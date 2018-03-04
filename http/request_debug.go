@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/anacrolix/dms/logging"
+	"github.com/Adirelle/go-libs/logging"
 )
 
 // DebugRequest logs request start, status to its associated logger, if any

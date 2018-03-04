@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/anacrolix/dms/logging"
+	"github.com/Adirelle/go-libs/logging"
 )
 
 type Service struct {

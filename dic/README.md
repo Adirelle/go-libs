@@ -1,4 +1,4 @@
 # Reflection-absed Dependency-Injection Container
 
-[![GoDoc](https://godoc.org/github.com/go-libs/dic?status.svg)](https://godoc.org/github.com/go-libs/dic)
+[![GoDoc](https://godoc.org/github.com/Adirelle/go-libs/dic?status.svg)](https://godoc.org/github.com/Adirelle/go-libs/dic)
 

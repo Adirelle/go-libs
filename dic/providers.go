@@ -4,162 +4,187 @@ import (
 	"fmt"
 	"log"
 	"reflect"
-	"strings"
+	"sync"
 )
 
+// Provider defines an interface for building values out of a Container.
 type Provider interface {
-	fmt.Stringer
+	// Provide is used to build the value.
+	// The Container can be used to pull in dependencies needed to build the value.
 	Provide(Container) (reflect.Value, error)
-	ValueType() reflect.Type
+
+	// Key returns a value used to index to this provider in the Container.
+	// This can be anything, but the expected types are string and reflect.Type.
+	Key() interface{}
+
+	// This is not strictly required but it is very useful for debugging.
+	fmt.Stringer
 }
 
-func Auto(v interface{}) Provider {
-	if p, isProvider := v.(Provider); isProvider {
-		return p
-	}
-	switch reflect.ValueOf(v).Type().Kind() {
-	case reflect.Func:
-		return Func(v)
-	case reflect.Struct:
-		return Struct(v)
-	}
-	return Constant(v)
+// ConstantProvider holds a value to return as is.
+type ConstantProvider struct {
+	// The provided value
+	Value reflect.Value
+	Type  reflect.Type
 }
 
-type constant reflect.Value
-
+// Constant creates a ConstantProvider for the given value.
 func Constant(value interface{}) Provider {
-	return constant(reflect.ValueOf(value))
+	return &ConstantProvider{reflect.ValueOf(value), reflect.TypeOf(value)}
 }
 
-func (c constant) String() string {
-	return reflect.Value(c).String()
+func (c *ConstantProvider) String() string {
+	return c.Value.Type().String()
 }
 
-func (c constant) Provide(Container) (reflect.Value, error) {
-	return reflect.Value(c), nil
+// Provide simply returns the constant.
+func (c *ConstantProvider) Provide(Container) (reflect.Value, error) {
+	return c.Value, nil
 }
 
-func (c constant) ValueType() reflect.Type {
-	return reflect.Value(c).Type()
+// Key returns the constant type.
+func (c *ConstantProvider) Key() interface{} {
+	return c.Type
 }
 
-type structProvider struct{ structType reflect.Type }
-
-func Struct(zero interface{}) Provider {
-	t := reflect.ValueOf(zero).Type()
-	if t.Kind() != reflect.Struct {
-		log.Panicf("Struct argument must be a struct, not a %s", t.Kind())
-	}
-	return structProvider{t}
-}
-
-func (p structProvider) String() string {
-	return p.structType.String()
-}
-
-func (p structProvider) Provide(container Container) (value reflect.Value, err error) {
-	typ := p.structType
-	value = reflect.New(typ).Elem()
-	num := typ.NumField()
-	for i := 0; i < num; i++ {
-		field := typ.Field(i)
-		if strings.ToLower(field.Name[:1]) == field.Name[:1] {
-			continue
-		}
-		var val reflect.Value
-		val, err = container.get(field.Name, field.Type)
-		if err != nil {
-			err = &FieldError{field, err}
-			return
-		}
-		value.Field(i).Set(val)
-	}
-	return
-}
-
-func (p structProvider) ValueType() reflect.Type {
-	return p.structType
-}
-
-type FieldError struct {
-	Field reflect.StructField
-	Err   error
-}
-
-func (e *FieldError) Error() string {
-	return fmt.Sprintf("cannot inject %s(%s): %s", e.Field.Name, e.Field.Type, e.Err)
-}
-
-type funcProvider struct{ fn reflect.Value }
-
-func Func(fn interface{}) Provider {
-	p := &funcProvider{fn: reflect.ValueOf(fn)}
-	funcType := p.fn.Type()
-	if funcType.Kind() != reflect.Func {
-		log.Panicf("ProviderFunc argument must be a func, not a %s", funcType.Kind())
-	}
-	if funcType.NumOut() < 1 {
-		log.Panicf("ProviderFunc argument must return at least one value, %#v does not", fn)
-	}
-	if funcType.NumOut() > 2 {
-		log.Panicf("ProviderFunc argument must return at most two values, %#v does not", fn)
-	}
-	if funcType.NumOut() == 2 && funcType.Out(1).String() != "error" {
-		log.Panicf("ProviderFunc second argument must be of type 'error', not %q", funcType.Out(1))
-	}
-	return p
-}
-
-func (p *funcProvider) String() string {
-	return p.fn.String()
-}
-
-func (p *funcProvider) Provide(container Container) (value reflect.Value, err error) {
-	typ := p.fn.Type()
-	numArgs := typ.NumIn()
-	args := make([]reflect.Value, 0, numArgs)
-	for i := 0; i < numArgs; i++ {
-		var arg reflect.Value
-		arg, err = container.get(typ.In(i))
-		if err != nil {
-			err = &FuncArgumentError{p.fn, err, i}
-			return
-		}
-		args = append(args, arg)
-	}
-	results := p.fn.Call(args)
-	value = results[0]
-	if len(results) == 2 {
-		var isErr bool
-		err, isErr = results[1].Interface().(error)
-		if isErr && err != nil {
-			err = &FuncCallError{p.fn, err, args}
-		}
-	}
-	return
-}
-
-func (p *funcProvider) ValueType() reflect.Type {
-	return p.fn.Type().Out(0)
-}
-
-type FuncCallError struct {
+// FuncProvider wraps a function to build the wanted value from arguments pulled from the container.
+type FuncProvider struct {
+	// The function itself.
 	Func reflect.Value
-	Err  error
+
+	// The types of its arguments.
+	ArgumentTypes []reflect.Type
+
+	// The type of the firstr returned valued.
+	ReturnType reflect.Type
+
+	// Indicates that the function returns an error in second position.
+	ReturnsError bool
+}
+
+/*
+Func builds a FuncProvider for the given function.
+
+The returned provided is a Singleton, to ensure the function is called only once.
+
+Func panics if the function does not respect the following conditions:
+
+    * The function returns less than one value or more than two.
+    * If the function returns two values, the second one must be of type error.
+
+*/
+func Func(fn interface{}) Provider {
+	t := validateProviderFunc(fn)
+	f := &FuncProvider{
+		Func:          reflect.ValueOf(fn),
+		ArgumentTypes: make([]reflect.Type, t.NumIn()),
+		ReturnType:    t.Out(0),
+		ReturnsError:  t.NumOut() == 2,
+	}
+	for i := 0; i < t.NumIn(); i++ {
+		f.ArgumentTypes[i] = t.In(i)
+	}
+	return &Singleton{Provider: f}
+}
+
+func validateProviderFunc(fn interface{}) (t reflect.Type) {
+	t = reflect.TypeOf(fn)
+	if t.Kind() != reflect.Func {
+		log.Panicf("Func argument must be a Func: %#v is a %s", fn, t.Kind())
+	} else if t.NumOut() < 1 {
+		log.Panicf("Func argument must return at least one value: %#v does not", fn)
+	} else if t.NumOut() > 2 {
+		log.Panicf("Func argument must return at most two values: %#v does not", fn)
+	} else if t.NumOut() == 2 && t.Out(1).String() != "error" {
+		log.Panicf("The second argument of Func argument must be of type 'error': %s is not", t.Out(1))
+	}
+	return
+}
+
+// String returns the function signature.
+func (p *FuncProvider) String() string {
+	return p.Func.Type().String()
+}
+
+/*
+Provide fetchs the function argments by type from the container and then call the functions.
+
+If the function returns an error, it is wrapped and returned by Provide.
+*/
+func (p *FuncProvider) Provide(container Container) (value reflect.Value, err error) {
+	args := make([]reflect.Value, len(p.ArgumentTypes))
+	for i, t := range p.ArgumentTypes {
+		ptr := reflect.New(t)
+		err = container.Fetch(ptr.Interface())
+		if err != nil {
+			err = &FuncArgumentError{p, err, i}
+			return
+		}
+		args[i] = ptr.Elem()
+	}
+	results := p.Func.Call(args)
+	value = results[0]
+	if p.ReturnsError && !results[1].IsNil() {
+		err = &FuncCallError{p, results[1].Interface().(error), args}
+	}
+	return
+}
+
+// Key returns the type of the first return value of the function.
+func (p *FuncProvider) Key() interface{} {
+	return p.ReturnType
+}
+
+// FuncCallError is returned when the func returned an actual error as its second return value.
+type FuncCallError struct {
+	// The provider that failed.
+	Func *FuncProvider
+
+	// The returned error.
+	Err error
+
+	// The arguments that was passed to the function.
 	Args []reflect.Value
 }
 
 func (e *FuncCallError) Error() string {
-	return fmt.Sprintf("%v(%v) returned:\n\t%s", e.Func.Type(), e.Args, e.Err)
+	return fmt.Sprintf("call to %s with %v returned:\n\t%s", e.Func, e.Args, e.Err)
 }
 
+// FuncArgumentError is returned by FuncProvider.Provider when an argument cannot be pulled from the container.
 type FuncArgumentError struct {
-	Func  reflect.Value
-	Err   error
+	// The provider that failed.
+	Func *FuncProvider
+
+	// The returned error.
+	Err error
+
+	// The argument position.
 	Index int
 }
 
 func (e *FuncArgumentError) Error() string {
-	return fmt.Sprintf("cannot inject argument #%d of %v:\n\t%s", e.Index, e.Func.Type(), e.Err)
+	return fmt.Sprintf("cannot inject argument #%d of %s:\n\t%s", e.Index, e.Func, e.Err)
+}
+
+// Singleton wraps another provider to guarantee it is used only once.
+type Singleton struct {
+	// The actual provider
+	Provider
+	once  sync.Once
+	value reflect.Value
+	err   error
+}
+
+func (s *Singleton) String() string {
+	return fmt.Sprintf("Singleton(%s)", s.Provider)
+}
+
+// Provide executes the actual providers and returns the values.
+// Subsequent calls to Provide always return the same values.
+func (s *Singleton) Provide(c Container) (reflect.Value, error) {
+	s.once.Do(func() {
+		s.value, s.err = s.Provider.Provide(c)
+	})
+	return s.value, s.err
 }

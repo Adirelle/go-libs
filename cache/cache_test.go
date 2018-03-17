@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-func ExampleNullCache() {
+func ExampleVoidStorage() {
 
-	n := NullCache{}
+	n := VoidStorage{}
 
 	fmt.Println(n.Get(5))
 	fmt.Println(n.Set(5, 6))
@@ -28,7 +28,7 @@ func ExampleNullCache() {
 
 func ExampleMemoryStorage() {
 
-	c := new(MemoryStorage)
+	c := NewMemoryStorage()
 
 	fmt.Println(c.Get(5))
 	fmt.Println(c.Set(5, 6))
@@ -76,13 +76,14 @@ func ExampleLoader() {
 	// 6 <nil>
 }
 
-func ExampleLockedCache() {
+func ExampleLockingCache() {
 
 	l := Loader(func(k interface{}) (interface{}, error) {
 		time.Sleep(time.Duration(k.(int)) * time.Millisecond)
 		return k, nil
 	})
-	c := LockedCache{Backend: l}
+
+	c := New(l, Locking)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

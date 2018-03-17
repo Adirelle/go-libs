@@ -27,6 +27,10 @@ func (printCache) Remove(k interface{}) bool {
 	return false
 }
 
+func (printCache) Flush() error {
+	return nil
+}
+
 type testSerializer struct{}
 
 func (testSerializer) Serialize(v interface{}) ([]byte, error) {
@@ -41,7 +45,7 @@ func ExampleSerializingCache() {
 
 	ser := testSerializer{}
 	b := printCache{}
-	c := SerializingCache{b, ser, ser}
+	c := New(b, Serialization(ser, ser))
 
 	fmt.Println(c.Set(50, 65))
 	fmt.Println(c.Get(50))

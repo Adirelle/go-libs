@@ -2,14 +2,18 @@ package cache
 
 import "github.com/boltdb/bolt"
 
-// BoltStorage stores the value in a bucket of a Bolt Database.
-type BoltStorage struct {
+// boltStorage stores the value in a bucket of a Bolt Database.
+type boltStorage struct {
 	DB         *bolt.DB
 	BucketName []byte
 }
 
-// Set writes the entry in the bucket.
-func (s *BoltStorage) Set(key interface{}, value interface{}) error {
+// NewBoltStorage creates a boltStorage from an open bolt.DB.
+func NewBoltStorage(db *bolt.DB, bucketName []byte) Cache {
+	return &boltStorage{db, bucketName}
+}
+
+func (s *boltStorage) Set(key interface{}, value interface{}) error {
 	return s.DB.Update(func(tx *bolt.Tx) (err error) {
 		b, err := tx.CreateBucketIfNotExists(s.BucketName)
 		if err != nil {
@@ -19,8 +23,7 @@ func (s *BoltStorage) Set(key interface{}, value interface{}) error {
 	})
 }
 
-// Get fetchs an entry from the bucket.
-func (s *BoltStorage) Get(key interface{}) (value interface{}, err error) {
+func (s *boltStorage) Get(key interface{}) (value interface{}, err error) {
 	err = s.DB.View(func(tx *bolt.Tx) (err error) {
 		b := tx.Bucket(s.BucketName)
 		if b != nil {
@@ -31,13 +34,15 @@ func (s *BoltStorage) Get(key interface{}) (value interface{}, err error) {
 	return
 }
 
-// GetIFPresent is a synonym to Get.
-func (s *BoltStorage) GetIFPresent(key interface{}) (interface{}, error) {
+func (s *boltStorage) GetIFPresent(key interface{}) (interface{}, error) {
 	return s.Get(key)
 }
 
-// Remove removes an entry from the bucket.
-func (s *BoltStorage) Remove(key interface{}) (found bool) {
+func (s *boltStorage) Flush() error {
+	return s.DB.Sync()
+}
+
+func (s *boltStorage) Remove(key interface{}) (found bool) {
 	s.DB.Update(func(tx *bolt.Tx) (err error) {
 		b := tx.Bucket(s.BucketName)
 		if b == nil {

@@ -2,66 +2,97 @@ package cache
 
 import "time"
 
-// ExpiringCache adds an expiration policy on top of an existing cache.
-type ExpiringCache struct {
-	Backend Cache
-	TTL     time.Duration
-	Clock   Clock
-	dates   map[interface{}]time.Time
+// expiringCache adds an expiration policy on top of an existing cache.
+// Expiration times are only kept in memory.
+type expiringCache struct {
+	// The cache backend
+	Cache
+
+	// The time-to-live of added entries
+	TTL time.Duration
+
+	// The clock implementation to use.
+	Clock
+
+	// dates holds the expiration dates per key.
+	dates map[interface{}]time.Time
 }
 
-type expiringItem struct {
-	value      interface{}
-	expiration time.Time
+// Expiration creates an Option to expire entries.
+func Expiration(ttl time.Duration) Option {
+	return ExpirationUsingClock(ttl, RealClock)
 }
 
-func NewExpiringCache(backend Cache, ttl time.Duration) *ExpiringCache {
-	return NewExpiringCacheWithClock(backend, ttl, RealClock{})
+// ExpirationUsingClock creates an Option to expire entries using the given clock.
+func ExpirationUsingClock(ttl time.Duration, cl Clock) Option {
+	return func(c Cache) Cache {
+		return &expiringCache{c, ttl, cl, make(map[interface{}]time.Time)}
+	}
 }
 
-func NewExpiringCacheWithClock(backend Cache, ttl time.Duration, clock Clock) *ExpiringCache {
-	return &ExpiringCache{backend, ttl, clock, make(map[interface{}]time.Time)}
-}
-
-func (e *ExpiringCache) Set(key interface{}, value interface{}) (err error) {
-	err = e.Backend.Set(key, value)
+// SetWithTTL tries and puts the entry into its backend, sets to expire after the given duration.
+// If the backend reports it is full, the expiringCache flushs itself to remove expired entries and tries again.
+func (e *expiringCache) SetWithTTL(key, value interface{}, ttl time.Duration) (err error) {
+	err = e.Cache.Set(key, value)
+	if err != ErrCacheFull {
+		err = e.Flush()
+		if err == nil {
+			err = e.Cache.Set(key, value)
+		}
+	}
 	if err == nil {
-		e.dates[key] = e.Clock.Now().Add(e.TTL)
+		e.dates[key] = e.Now().Add(ttl)
 	}
 	return
 }
 
-func (e *ExpiringCache) Get(key interface{}) (value interface{}, err error) {
-	value, err = e.Backend.Get(key)
+// Set is a synonym to c.SetWithTTL(key, value, c.TTL)
+func (e *expiringCache) Set(key, value interface{}) error {
+	return e.SetWithTTL(key, value, e.TTL)
+}
+
+// Get gets the entry from its backend.
+// If the entry is expired, it is removed from the backend and Get returns ErrKeyNotFound.
+func (e *expiringCache) Get(key interface{}) (interface{}, error) {
+	value, err := e.Cache.Get(key)
+	return e.got(key, value, err)
+}
+
+// GetIFPresent gets the entry from its backend.
+// If the entry is expired, it is removed from the backend and GetIFPresent returns ErrKeyNotFound.
+func (e *expiringCache) GetIFPresent(key interface{}) (interface{}, error) {
+	value, err := e.Cache.GetIFPresent(key)
+	return e.got(key, value, err)
+}
+
+func (e *expiringCache) got(key, value interface{}, err error) (interface{}, error) {
 	if err != nil {
-		return
+		return nil, err
 	}
 	if t, found := e.dates[key]; !found {
-		e.dates[key] = e.Clock.Now().Add(e.TTL)
-	} else if t.Before(e.Clock.Now()) {
+		e.dates[key] = e.Now().Add(e.TTL)
+	} else if t.Before(e.Now()) {
 		e.Remove(key)
 		return nil, ErrKeyNotFound
 	}
-	return
+	return value, nil
 }
 
-func (e *ExpiringCache) GetIFPresent(key interface{}) (value interface{}, err error) {
-	value, err = e.Backend.GetIFPresent(key)
-	if err != nil {
-		return
-	}
-	if t, found := e.dates[key]; !found {
-		e.dates[key] = e.Clock.Now().Add(e.TTL)
-	} else if t.Before(e.Clock.Now()) {
-		e.Remove(key)
-		return nil, ErrKeyNotFound
-	}
-	return
-}
-
-func (e *ExpiringCache) Remove(key interface{}) bool {
+// Remove removes the entry from its backend.
+func (e *expiringCache) Remove(key interface{}) bool {
 	delete(e.dates, key)
-	return e.Backend.Remove(key)
+	return e.Cache.Remove(key)
+}
+
+// Flush removes all expired entries from its backend then flushs it.
+func (e *expiringCache) Flush() error {
+	now := e.Now()
+	for key, date := range e.dates {
+		if date.Before(now) {
+			e.Remove(key)
+		}
+	}
+	return e.Cache.Flush()
 }
 
 // Clock is a simple clock abstraction
@@ -69,18 +100,18 @@ type Clock interface {
 	Now() time.Time
 }
 
-// RealClock is a Clock implementation using time.Now().
-type RealClock struct{}
+// RealClock is a Clock implementation that uses time.Now().
+var RealClock Clock = realClock{}
 
-// Now returns  time.Now().
-func (RealClock) Now() time.Time { return time.Now() }
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now() }
 
 // FakeClock is a Clock implementation that must be advanced "manually".
-// It can be used for testing.
 type FakeClock time.Time
 
-// NewFackClock returns an FakeClock instance so Now() returns a non-zero time.Time
-func NewFackClock() *FakeClock {
+// NewFakeClock returns an FakeClock instance so Now() returns a non-zero time.Time
+func NewFakeClock() *FakeClock {
 	f := FakeClock(time.Unix(0, 0))
 	f.Advance(1)
 	return &f

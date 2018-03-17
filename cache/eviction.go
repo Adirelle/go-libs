@@ -5,166 +5,192 @@ import (
 	"container/list"
 )
 
-// EvictingCache adds an eviction strategy to an existing cache to keep its size under a given strategy.
-type EvictingCache struct {
-	Backend  Cache
-	Strategy EvictionStrategy
-}
-
-// EvictionStrategy is used by EvictingCache to evict items.
-// Note that EvictionStrategy is stateful and must not be share between several EvictionStrategy.
+// EvictionStrategy is used by evictingCache to evict items.
+// Note that most EvictionStrategy are stateful and must not be shared between several evictingCache.
 type EvictionStrategy interface {
-	Added(key interface{})
-	Removed(key interface{})
+	Add(key interface{})
+	Remove(key interface{}) (removed bool)
 	Hit(key interface{})
-	ToEvict() (interface{}, bool)
+	Pop() (key interface{})
 }
 
-func (c *EvictingCache) Set(key interface{}, value interface{}) (err error) {
-	err = c.Backend.Set(key, value)
-	if err != nil {
-		return
+// evictingCache uses a strategy to evict entries from its backend when the latter is full.
+type evictingCache struct {
+	Cache
+	s EvictionStrategy
+}
+
+// LRUEviction adds entry eviction using the Least-Recently-Used strategy
+var LRUEviction Option = func(c Cache) Cache {
+	return &evictingCache{c, newLRUEviction()}
+}
+
+// LFUEviction adds entry eviction using the Least-Frequently-Used strategy
+var LFUEviction Option = func(c Cache) Cache {
+	return &evictingCache{c, newLFUEviction()}
+}
+
+// Set tries to put an entries into its backend. If it is full, it tries to evict an entry.
+// It only returns ErrCacheFull if it cannot evict any entries while the backend reports it is full.
+func (c *evictingCache) Set(key, value interface{}) error {
+	for true {
+		err := c.Cache.Set(key, value)
+		if err == nil {
+			break
+		}
+		if err != ErrCacheFull {
+			return err
+		}
+		toEvict := c.s.Pop()
+		if toEvict == nil {
+			return err
+		}
+		c.Remove(toEvict)
 	}
-	c.Strategy.Added(key)
-	key, evict := c.Strategy.ToEvict()
-	for evict {
-		c.Backend.Remove(key)
-		key, evict = c.Strategy.ToEvict()
-	}
+	c.s.Add(key)
 	return nil
 }
 
-func (c *EvictingCache) Get(key interface{}) (value interface{}, err error) {
-	value, err = c.Backend.Get(key)
+func (c *evictingCache) Get(key interface{}) (value interface{}, err error) {
+	value, err = c.Cache.Get(key)
 	if err == nil {
-		c.Strategy.Hit(key)
+		c.s.Hit(key)
 	}
 	return
 }
 
-func (c *EvictingCache) GetIFPresent(key interface{}) (value interface{}, err error) {
-	value, err = c.Backend.GetIFPresent(key)
+func (c *evictingCache) GetIFPresent(key interface{}) (value interface{}, err error) {
+	value, err = c.Cache.GetIFPresent(key)
 	if err == nil {
-		c.Strategy.Hit(key)
+		c.s.Hit(key)
 	}
 	return
 }
 
-func (c *EvictingCache) Remove(key interface{}) bool {
-	if !c.Backend.Remove(key) {
-		return false
+func (c *evictingCache) Remove(key interface{}) (removed bool) {
+	if removed = c.Cache.Remove(key); removed {
+		c.s.Remove(key)
 	}
-	c.Strategy.Removed(key)
-	return true
+	return
 }
 
 // Least-Recently Used eviction strategy
 
 type lruEviction struct {
-	capacity int
 	keys     *list.List
 	elements map[interface{}]*list.Element
 }
 
-func NewLRUEviction(capacity int) EvictionStrategy {
-	return &lruEviction{capacity, list.New(), make(map[interface{}]*list.Element)}
+func newLRUEviction() EvictionStrategy {
+	return &lruEviction{list.New(), make(map[interface{}]*list.Element)}
 }
 
-func (e *lruEviction) Added(key interface{}) {
+func (e *lruEviction) Add(key interface{}) {
 	e.elements[key] = e.keys.PushFront(key)
 }
 
-func (e *lruEviction) Removed(key interface{}) {
-	if elem, found := e.elements[key]; found {
+func (e *lruEviction) Remove(key interface{}) (found bool) {
+	elem, found := e.elements[key]
+	if found {
 		e.keys.Remove(elem)
 		delete(e.elements, key)
 	}
+	return
 }
 
 func (e *lruEviction) Hit(key interface{}) {
 	if elem, found := e.elements[key]; found {
 		e.keys.MoveToFront(elem)
 	} else {
-		e.Added(key)
+		e.Add(key)
 	}
 }
 
-func (e *lruEviction) ToEvict() (key interface{}, evict bool) {
-	if evict = e.keys.Len() > e.capacity; evict {
-		key = e.keys.Remove(e.keys.Back())
-		delete(e.elements, key)
-	}
+func (e *lruEviction) Pop() (key interface{}) {
+	key = e.keys.Remove(e.keys.Back())
+	delete(e.elements, key)
 	return
 }
 
 // Least-Frequently Used eviction strategy
 
 type lfuEviction struct {
-	capacity int
-	index    map[interface{}]int
-	keys     []interface{}
-	counts   []int
+	heap *countHeap
 }
 
-func NewLFUEviction(capacity int) EvictionStrategy {
-	e := &lfuEviction{capacity, make(map[interface{}]int), nil, nil}
-	heap.Init(e)
+func newLFUEviction() EvictionStrategy {
+	e := &lfuEviction{&countHeap{make(map[interface{}]int), nil, nil}}
+	heap.Init(e.heap)
 	return e
 }
 
-func (e *lfuEviction) Added(key interface{}) {
-	heap.Push(e, key)
+func (e *lfuEviction) Add(key interface{}) {
+	heap.Push(e.heap, key)
 }
 
-func (e *lfuEviction) Removed(key interface{}) {
-	if i, found := e.index[key]; found {
-		heap.Remove(e, i)
-	}
+func (e *lfuEviction) Remove(key interface{}) (found bool) {
+	return e.heap.Remove(key)
 }
 
 func (e *lfuEviction) Hit(key interface{}) {
-	i, found := e.index[key]
-	if !found {
-		e.Added(key)
-		i = e.index[key]
-	}
-	e.counts[i]++
-	heap.Fix(e, i)
+	e.heap.Increase(key)
 }
 
-func (e *lfuEviction) ToEvict() (key interface{}, evict bool) {
-	if evict = e.Len() > e.capacity; evict {
-		key = heap.Pop(e)
+func (e *lfuEviction) Pop() (key interface{}) {
+	return heap.Pop(e.heap)
+}
+
+type countHeap struct {
+	index  map[interface{}]int
+	keys   []interface{}
+	counts []int
+}
+
+func (h *countHeap) Len() int {
+	return len(h.keys)
+}
+
+func (h *countHeap) Less(i, j int) bool {
+	return h.counts[j] < h.counts[i]
+}
+
+func (h *countHeap) Swap(i, j int) {
+	h.counts[i], h.counts[j] = h.counts[j], h.counts[i]
+	h.keys[i], h.keys[j] = h.keys[j], h.keys[i]
+	h.index[h.keys[i]], h.index[h.keys[j]] = i, j
+}
+
+func (h *countHeap) Increase(key interface{}) (found bool) {
+	i, found := h.index[key]
+	if !found {
+		h.Push(key)
+		i = h.index[key]
+	}
+	h.counts[i]++
+	heap.Fix(h, i)
+	return
+}
+
+func (h *countHeap) Remove(key interface{}) (found bool) {
+	i, found := h.index[key]
+	if found {
+		heap.Remove(h, i)
 	}
 	return
 }
 
-func (e *lfuEviction) Len() int {
-	return len(e.keys)
+func (h *countHeap) Push(key interface{}) {
+	n := len(h.keys)
+	h.counts = append(h.counts, 0)
+	h.keys = append(h.keys, key)
+	h.index[key] = n
 }
 
-func (e *lfuEviction) Less(i, j int) bool {
-	return e.counts[j] < e.counts[i]
-}
-
-func (e *lfuEviction) Swap(i, j int) {
-	e.counts[i], e.counts[j] = e.counts[j], e.counts[i]
-	e.keys[i], e.keys[j] = e.keys[j], e.keys[i]
-	e.index[e.keys[i]], e.index[e.keys[j]] = i, j
-}
-
-func (e *lfuEviction) Push(key interface{}) {
-	n := len(e.keys)
-	e.counts = append(e.counts, 0)
-	e.keys = append(e.keys, key)
-	e.index[key] = n
-}
-
-func (e *lfuEviction) Pop() (key interface{}) {
-	n := len(e.keys) - 1
-	key = e.keys[n]
-	e.counts = e.counts[:n]
-	e.keys = e.keys[:n]
-	delete(e.index, key)
+func (h *countHeap) Pop() (key interface{}) {
+	n := len(h.keys) - 1
+	key = h.keys[n]
+	h.counts = h.counts[:n]
+	h.keys = h.keys[:n]
+	delete(h.index, key)
 	return
 }

@@ -7,9 +7,9 @@ import (
 
 func ExampleExpiringCache() {
 
-	b := new(MemoryStorage)
-	cl := NewFackClock()
-	c := NewExpiringCacheWithClock(b, 8*time.Second, cl)
+	b := NewMemoryStorage()
+	cl := NewFakeClock()
+	c := New(b, ExpirationUsingClock(8*time.Second, cl))
 
 	fmt.Println(c.Set(5, 6))
 	fmt.Println(c.Get(5))
@@ -24,13 +24,4 @@ func ExampleExpiringCache() {
 
 	fmt.Println(c.Get(5))
 	fmt.Println(c.Get(7))
-
-	// Output:
-	// <nil>
-	// 6 <nil>
-	// 6 <nil>
-	// <nil>
-	// 8 <nil>
-	// <nil> Key not found
-	// <nil> Key not found
 }

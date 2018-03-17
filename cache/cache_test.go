@@ -1,108 +1,154 @@
 package cache
 
 import (
-	"fmt"
 	"sync"
+	"testing"
 	"time"
 )
 
-func ExampleVoidStorage() {
+func TestVoidStorage(t *testing.T) {
 
-	c := NewVoidStorage()
+	c := NewVoidStorage(Spy(t.Logf))
 
-	fmt.Println(c.Get(5))
-	fmt.Println(c.Set(5, 6))
-	fmt.Println(c.Get(5))
-	fmt.Println(c.GetIFPresent(5))
-	fmt.Println(c.Remove(5))
-	fmt.Println(c.Get(5))
+	if c.Set(5, 6) != nil {
+		t.Error("Set: expected <nil>")
+	}
 
-	// Output:
-	// <nil> Key not found
-	// <nil>
-	// <nil> Key not found
-	// <nil> Key not found
-	// false
-	// <nil> Key not found
+	if v, err := c.Get(5); v != nil || err != ErrKeyNotFound {
+		t.Errorf("Get: expected <nil>, %v", ErrKeyNotFound)
+	}
+
+	if v, err := c.GetIFPresent(5); v != nil || err != ErrKeyNotFound {
+		t.Errorf("GetIFPresent: expected <nil>, %v", ErrKeyNotFound)
+	}
+
+	if c.Remove(5) {
+		t.Error("Remove: expected false")
+	}
+
+	if err := c.Flush(); err != nil {
+		t.Error("Flush: expected <nil>")
+	}
 }
 
-func ExampleMemoryStorage() {
+func TestMemoryStorage(t *testing.T) {
 
-	c := NewMemoryStorage()
+	c := NewMemoryStorage(Spy(t.Logf))
 
-	fmt.Println(c.Get(5))
-	fmt.Println(c.Set(5, 6))
-	fmt.Println(c.Get(5))
-	fmt.Println(c.GetIFPresent(5))
-	fmt.Println(c.Remove(5))
-	fmt.Println(c.Remove(5))
-	fmt.Println(c.Get(5))
+	if c.Set(5, 6) != nil {
+		t.Error("Set: expected <nil>")
+	}
 
-	// Output:
-	// <nil> Key not found
-	// <nil>
-	// 6 <nil>
-	// 6 <nil>
-	// true
-	// false
-	// <nil> Key not found
+	if v, err := c.Get(5); v != 6 || err != nil {
+		t.Error("Get: expected 6, <nil>")
+	}
+
+	if v, err := c.GetIFPresent(5); v != 6 || err != nil {
+		t.Error("GetIFPresent: expected 6, <nil>")
+	}
+
+	if !c.Remove(5) {
+		t.Error("Remove: expected true")
+	}
+
+	if v, err := c.Get(5); v != nil || err != ErrKeyNotFound {
+		t.Errorf("Get: expected <nil>, %v", ErrKeyNotFound)
+	}
+
+	if c.Remove(5) {
+		t.Error("Remove: expected false")
+	}
+
+	if err := c.Flush(); err != nil {
+		t.Error("Flush: expected <nil>")
+	}
 }
 
-func ExampleLoader() {
+func TestLoader(t *testing.T) {
 
-	c := NewLoader(func(k interface{}) (interface{}, error) {
-		fmt.Println("Load", k)
-		return 6, nil
-	})
+	c := NewLoader(
+		func(k interface{}) (interface{}, error) {
+			t.Logf("Load %v", k)
+			return k, nil
+		},
+		Spy(t.Logf),
+	)
 
-	fmt.Println(c.Get(5))
-	fmt.Println(c.Set(5, 6))
-	fmt.Println(c.Get(5))
-	fmt.Println(c.GetIFPresent(5))
-	fmt.Println(c.Remove(5))
-	fmt.Println(c.Remove(5))
-	fmt.Println(c.Get(5))
+	if v, err := c.Get(5); err != nil || v != 5 {
+		t.Error("Get: expected 5, <nil>")
+	}
 
-	// Output:
-	// Load 5
-	// 6 <nil>
-	// <nil>
-	// Load 5
-	// 6 <nil>
-	// <nil> Key not found
-	// false
-	// false
-	// Load 5
-	// 6 <nil>
+	if err := c.Set(5, 6); err != nil {
+		t.Error("Set: expected <nil>")
+	}
+
+	if v, err := c.GetIFPresent(5); v != nil || err != ErrKeyNotFound {
+		t.Errorf("GetIFPresent: expected <nil>, %s", ErrKeyNotFound)
+	}
+
+	if v := c.Remove(5); v {
+		t.Error("Remove: expected false")
+	}
+
+	if err := c.Flush(); err != nil {
+		t.Error("Flush: expected <nil>")
+	}
 }
 
-func ExampleLockingCache() {
+type delayed struct{ Cache }
 
-	c := NewLoader(func(k interface{}) (interface{}, error) {
-		time.Sleep(time.Duration(k.(int)) * time.Millisecond)
-		return k, nil
-	}, Locking)
+func (d delayed) Set(k, v interface{}) error {
+	time.Sleep(time.Millisecond * time.Duration(v.(int)))
+	return d.Cache.Set(k, v)
+}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+func (d delayed) Get(k interface{}) (interface{}, error) {
+	time.Sleep(time.Millisecond * time.Duration(k.(int)))
+	return d.Cache.Get(k)
+}
 
-	fmt.Println("Get(500)")
+func TestLockingCache(t *testing.T) {
+
+	c := NewMemoryStorage(
+		Spy(t.Logf),
+		Locking,
+		func(c Cache) Cache { return delayed{c} },
+	)
+
+	wg := sync.WaitGroup{}
+	wg.Add(3)
+
 	go func() {
 		defer wg.Done()
-		fmt.Println(c.Get(500))
+		if err := c.Set(100, 200); err != nil {
+			t.Error("Set: expected <nil>")
+		}
 	}()
 
-	fmt.Println("Get(200)")
 	go func() {
 		defer wg.Done()
-		fmt.Println(c.Get(200))
+		time.Sleep(50 * time.Millisecond)
+		if v, err := c.Get(100); err != nil || v != 200 {
+			t.Error("Get: expected 200, <nil>")
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		time.Sleep(100 * time.Millisecond)
+		if v, err := c.GetIFPresent(100); err != nil || v != 200 {
+			t.Error("GetIFPresent: expected 200, <nil>")
+		}
 	}()
 
 	wg.Wait()
 
-	// Output:
-	// Get(500)
-	// Get(200)
-	// 200 <nil>
-	// 500 <nil>
+	if !c.Remove(100) {
+		t.Error("Remove: expected true")
+	}
+
+	if err := c.Flush(); err != nil {
+		t.Error("Flush: expected <nil>")
+	}
+
 }

@@ -2,6 +2,8 @@ package cache
 
 import (
 	"errors"
+	"fmt"
+	"reflect"
 	"sync"
 )
 
@@ -30,6 +32,8 @@ type Cache interface {
 
 	// Flush instructs the cache to perform any pending operations.
 	Flush() error
+
+	fmt.Stringer
 }
 
 // Option alters the cache behavior, adding new features.
@@ -56,6 +60,7 @@ func (voidStorage) Get(interface{}) (interface{}, error)          { return nil, 
 func (voidStorage) GetIFPresent(interface{}) (interface{}, error) { return nil, ErrKeyNotFound }
 func (voidStorage) Remove(interface{}) bool                       { return false }
 func (voidStorage) Flush() error                                  { return nil }
+func (voidStorage) String() string                                { return "Void()" }
 
 // NewMemoryStorage creates an empty memory storage, using a simple go map.
 func NewMemoryStorage(opts ...Option) Cache {
@@ -99,6 +104,10 @@ func (s *memoryStorage) Flush() error {
 	return nil
 }
 
+func (s *memoryStorage) String() string {
+	return fmt.Sprintf("Memory(%p)", *s)
+}
+
 // NewLoader creates a cache from a LoaderFunc
 func NewLoader(f LoaderFunc, opts ...Option) Cache {
 	return options(opts).applyTo(f)
@@ -121,6 +130,10 @@ func (LoaderFunc) Remove(interface{}) bool { return false }
 
 // Flush is a no-op and never fails.
 func (LoaderFunc) Flush() error { return nil }
+
+func (l LoaderFunc) String() string {
+	return fmt.Sprintf("Loader(0x%08x)", reflect.ValueOf(l).Pointer())
+}
 
 // locking secures concurrent access to a Cache using a sync.Mutex.
 type locking struct {
@@ -163,8 +176,12 @@ func (l *locking) Flush() error {
 	return l.Cache.Flush()
 }
 
+func (l *locking) String() string {
+	return fmt.Sprintf("Locked(%s)", l.Cache)
+}
+
 // Printf is printf signature
-type Printf func(string, ...interface{}) (int, error)
+type Printf func(string, ...interface{})
 
 type spy struct {
 	Cache
@@ -180,30 +197,30 @@ func Spy(f Printf) Option {
 
 func (s *spy) Set(key, value interface{}) (err error) {
 	err = s.Cache.Set(key, value)
-	s.f("Set(%v, %v) -> %v\n", key, value, err)
+	s.f("%s.Set(%v, %v) -> %v\n", s.Cache, key, value, err)
 	return
 }
 
 func (s *spy) Get(key interface{}) (value interface{}, err error) {
 	value, err = s.Cache.Get(key)
-	s.f("Get(%v) -> %v, %v\n", key, value, err)
+	s.f("%s.Get(%v) -> %v, %v\n", s.Cache, key, value, err)
 	return
 }
 
 func (s *spy) GetIFPresent(key interface{}) (value interface{}, err error) {
 	value, err = s.Cache.GetIFPresent(key)
-	s.f("GetIFPresent(%v) -> %v, %v\n", key, value, err)
+	s.f("%s.GetIFPresent(%v) -> %v, %v\n", s.Cache, key, value, err)
 	return
 }
 
 func (s *spy) Remove(key interface{}) (removed bool) {
 	removed = s.Cache.Remove(key)
-	s.f("Remove(%v) -> %v\n", key, removed)
+	s.f("%s.Remove(%v) -> %v\n", s.Cache, key, removed)
 	return
 }
 
 func (s *spy) Flush() (err error) {
 	err = s.Cache.Flush()
-	s.f("Flush() -> %v\n", err)
+	s.f("%s.Flush() -> %v\n", s.Cache, err)
 	return
 }

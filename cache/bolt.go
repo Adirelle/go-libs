@@ -1,11 +1,15 @@
 package cache
 
-import "github.com/boltdb/bolt"
+import (
+	"fmt"
+
+	"github.com/boltdb/bolt"
+)
 
 // boltStorage stores the value in a bucket of a Bolt Database.
 type boltStorage struct {
-	DB         *bolt.DB
-	BucketName []byte
+	db         *bolt.DB
+	bucketName []byte
 }
 
 // NewBoltStorage creates a boltStorage from an open bolt.DB.
@@ -14,8 +18,8 @@ func NewBoltStorage(db *bolt.DB, bucketName []byte, opts ...Option) Cache {
 }
 
 func (s *boltStorage) Set(key interface{}, value interface{}) error {
-	return s.DB.Update(func(tx *bolt.Tx) (err error) {
-		b, err := tx.CreateBucketIfNotExists(s.BucketName)
+	return s.db.Update(func(tx *bolt.Tx) (err error) {
+		b, err := tx.CreateBucketIfNotExists(s.bucketName)
 		if err != nil {
 			return
 		}
@@ -24,8 +28,8 @@ func (s *boltStorage) Set(key interface{}, value interface{}) error {
 }
 
 func (s *boltStorage) Get(key interface{}) (value interface{}, err error) {
-	err = s.DB.View(func(tx *bolt.Tx) (err error) {
-		b := tx.Bucket(s.BucketName)
+	err = s.db.View(func(tx *bolt.Tx) (err error) {
+		b := tx.Bucket(s.bucketName)
 		if b != nil {
 			value = b.Get(key.([]byte))
 		}
@@ -39,12 +43,12 @@ func (s *boltStorage) GetIFPresent(key interface{}) (interface{}, error) {
 }
 
 func (s *boltStorage) Flush() error {
-	return s.DB.Sync()
+	return s.db.Sync()
 }
 
 func (s *boltStorage) Remove(key interface{}) (found bool) {
-	s.DB.Update(func(tx *bolt.Tx) (err error) {
-		b := tx.Bucket(s.BucketName)
+	s.db.Update(func(tx *bolt.Tx) (err error) {
+		b := tx.Bucket(s.bucketName)
 		if b == nil {
 			return
 		}
@@ -55,4 +59,8 @@ func (s *boltStorage) Remove(key interface{}) (found bool) {
 		return b.Delete(key.([]byte))
 	})
 	return
+}
+
+func (s *boltStorage) String() string {
+	return fmt.Sprintf("Bolt(%q,%q)", s.db.Path(), s.bucketName)
 }

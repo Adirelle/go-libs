@@ -1,8 +1,8 @@
 package cache
 
 import (
-	"fmt"
 	"strconv"
+	"testing"
 )
 
 type testSerializer struct{}
@@ -15,15 +15,17 @@ func (testSerializer) Unserialize(d []byte) (interface{}, error) {
 	return strconv.Atoi(string(d))
 }
 
-func ExampleSerializingCache() {
+func TestSerializingCache(t *testing.T) {
 
 	ser := testSerializer{}
-	c := NewVoidStorage(Serialization(ser, ser), Spy(fmt.Printf))
+	c := NewVoidStorage(Spy(t.Logf), Serialization(ser, ser), Spy(t.Logf))
 
 	c.Set(50, 65)
 	c.Get(50)
 	c.GetIFPresent(50)
 	c.Remove(50)
+
+	t.Fail()
 
 	// Output:
 	// Set([53 48], [54 53]) -> <nil>

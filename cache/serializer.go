@@ -1,5 +1,7 @@
 package cache
 
+import "fmt"
+
 // Serializer is used to (un)serialize keys and values.
 type Serializer interface {
 	Serialize(interface{}) ([]byte, error)
@@ -61,4 +63,8 @@ func (c *serializingCache) Remove(key interface{}) bool {
 		return false
 	}
 	return c.Cache.Remove(skey)
+}
+
+func (c *serializingCache) String() string {
+	return fmt.Sprintf("Serialized(%s,%v,%v)", c.Cache, c.KeySerializer, c.ValueSerializer)
 }

@@ -1,6 +1,9 @@
 package cache
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type expiringCache struct {
 	Cache
@@ -23,7 +26,7 @@ func ExpirationUsingClock(ttl time.Duration, cl Clock) Option {
 
 func (e *expiringCache) SetWithTTL(key, value interface{}, ttl time.Duration) (err error) {
 	err = e.Cache.Set(key, value)
-	if err != ErrCacheFull {
+	if err == ErrCacheFull {
 		err = e.Flush()
 		if err == nil {
 			err = e.Cache.Set(key, value)
@@ -75,6 +78,10 @@ func (e *expiringCache) Flush() error {
 		}
 	}
 	return e.Cache.Flush()
+}
+
+func (e *expiringCache) String() string {
+	return fmt.Sprintf("Expiring(%s,%s)", e.Cache, e.ttl)
 }
 
 // Clock is a simple clock abstraction

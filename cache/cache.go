@@ -20,7 +20,7 @@ type Cache interface {
 	// It returns nil and ErrKeyNotFound when the key is not present.
 	Get(key interface{}) (interface{}, error)
 
-	// GetIFPresent fetchs an entry from the cache, without triggering any automatic loader.
+	// GetIFPresent fetchs an entry from the cache, without triggering any automatic LoaderFunc.
 	// It returns nil and ErrKeyNotFound when the key is not present.
 	GetIFPresent(key interface{}) (interface{}, error)
 
@@ -32,21 +32,22 @@ type Cache interface {
 	Flush() error
 }
 
-// Option is used to alter to
+// Option alters the cache behavior, adding new features.
 type Option func(Cache) Cache
 
-// New creates a Cache from the given storage and options.
-// The options are applied from last to first (e.g. innermost to outermost).
-func New(storage Cache, options ...Option) Cache {
-	c := storage
-	for i := len(options) - 1; i >= 0; i-- {
-		c = options[i](c)
+type options []Option
+
+func (o options) applyTo(c Cache) Cache {
+	for i := len(o) - 1; i >= 0; i-- {
+		c = o[i](c)
 	}
 	return c
 }
 
-// VoidStorage is a singleton that does not store nor return any entries.
-var VoidStorage Cache = voidStorage{}
+// NewVoidStorage returns a cache that does not store nor return any entries, but can be used for side effects of options.
+func NewVoidStorage(opts ...Option) Cache {
+	return options(opts).applyTo(voidStorage{})
+}
 
 type voidStorage struct{}
 
@@ -57,8 +58,8 @@ func (voidStorage) Remove(interface{}) bool                       { return false
 func (voidStorage) Flush() error                                  { return nil }
 
 // NewMemoryStorage creates an empty memory storage, using a simple go map.
-func NewMemoryStorage() Cache {
-	return new(memoryStorage)
+func NewMemoryStorage(opts ...Option) Cache {
+	return options(opts).applyTo(new(memoryStorage))
 }
 
 type memoryStorage map[interface{}]interface{}
@@ -98,61 +99,111 @@ func (s *memoryStorage) Flush() error {
 	return nil
 }
 
-// Loader emulates a cache by dynamically building the values from the given keys on calls to Get.
-type Loader func(interface{}) (interface{}, error)
+// NewLoader creates a cache from a LoaderFunc
+func NewLoader(f LoaderFunc, opts ...Option) Cache {
+	return options(opts).applyTo(f)
+}
+
+// LoaderFunc simulates a cache by calling the functions on call to Get.
+type LoaderFunc func(interface{}) (interface{}, error)
 
 // Set is a no-op and never fails.
-func (Loader) Set(interface{}, interface{}) error { return nil }
+func (LoaderFunc) Set(interface{}, interface{}) error { return nil }
 
-// Get calls the loader function.
-func (l Loader) Get(key interface{}) (interface{}, error) { return l(key) }
+// Get calls the function.
+func (l LoaderFunc) Get(key interface{}) (interface{}, error) { return l(key) }
 
 // GetIFPresent is a no-op and always returns ErrKeyNotFound.
-func (Loader) GetIFPresent(interface{}) (interface{}, error) { return nil, ErrKeyNotFound }
+func (LoaderFunc) GetIFPresent(interface{}) (interface{}, error) { return nil, ErrKeyNotFound }
 
 // Remove is a no-op and always returns false.
-func (Loader) Remove(interface{}) bool { return false }
+func (LoaderFunc) Remove(interface{}) bool { return false }
 
 // Flush is a no-op and never fails.
-func (Loader) Flush() error { return nil }
+func (LoaderFunc) Flush() error { return nil }
 
-// lockingCache secures concurrent access to a Cache using a sync.Mutex.
-type lockingCache struct {
+// locking secures concurrent access to a Cache using a sync.Mutex.
+type locking struct {
 	Cache
-	mu sync.Mutex
+	sync.Mutex
 }
 
 // Locking adds locking to an existing cache so it becomes safe to use from several goroutines.
 var Locking Option = func(c Cache) Cache {
-	return &lockingCache{Cache: c}
+	return &locking{Cache: c}
 }
 
-func (c *lockingCache) Set(key interface{}, value interface{}) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.Cache.Set(key, value)
+func (l *locking) Set(key interface{}, value interface{}) error {
+	l.Lock()
+	defer l.Unlock()
+	return l.Cache.Set(key, value)
 }
 
-func (c *lockingCache) Get(key interface{}) (interface{}, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.Cache.Get(key)
+func (l *locking) Get(key interface{}) (interface{}, error) {
+	l.Lock()
+	defer l.Unlock()
+	return l.Cache.Get(key)
 }
 
-func (c *lockingCache) GetIFPresent(key interface{}) (interface{}, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.Cache.GetIFPresent(key)
+func (l *locking) GetIFPresent(key interface{}) (interface{}, error) {
+	l.Lock()
+	defer l.Unlock()
+	return l.Cache.GetIFPresent(key)
 }
 
-func (c *lockingCache) Remove(key interface{}) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.Cache.Remove(key)
+func (l *locking) Remove(key interface{}) bool {
+	l.Lock()
+	defer l.Unlock()
+	return l.Cache.Remove(key)
 }
 
-func (c *lockingCache) Flush() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.Cache.Flush()
+func (l *locking) Flush() error {
+	l.Lock()
+	defer l.Unlock()
+	return l.Cache.Flush()
+}
+
+// Printf is printf signature
+type Printf func(string, ...interface{}) (int, error)
+
+type spy struct {
+	Cache
+	f Printf
+}
+
+// Spy prints all operation using the provided printf function.
+func Spy(f Printf) Option {
+	return func(c Cache) Cache {
+		return &spy{c, f}
+	}
+}
+
+func (s *spy) Set(key, value interface{}) (err error) {
+	err = s.Cache.Set(key, value)
+	s.f("Set(%v, %v) -> %v\n", key, value, err)
+	return
+}
+
+func (s *spy) Get(key interface{}) (value interface{}, err error) {
+	value, err = s.Cache.Get(key)
+	s.f("Get(%v) -> %v, %v\n", key, value, err)
+	return
+}
+
+func (s *spy) GetIFPresent(key interface{}) (value interface{}, err error) {
+	value, err = s.Cache.GetIFPresent(key)
+	s.f("GetIFPresent(%v) -> %v, %v\n", key, value, err)
+	return
+}
+
+func (s *spy) Remove(key interface{}) (removed bool) {
+	removed = s.Cache.Remove(key)
+	s.f("Remove(%v) -> %v\n", key, removed)
+	return
+}
+
+func (s *spy) Flush() (err error) {
+	err = s.Cache.Flush()
+	s.f("Flush() -> %v\n", err)
+	return
 }

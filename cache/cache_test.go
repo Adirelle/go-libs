@@ -8,14 +8,14 @@ import (
 
 func ExampleVoidStorage() {
 
-	n := VoidStorage{}
+	c := NewVoidStorage()
 
-	fmt.Println(n.Get(5))
-	fmt.Println(n.Set(5, 6))
-	fmt.Println(n.Get(5))
-	fmt.Println(n.GetIFPresent(5))
-	fmt.Println(n.Remove(5))
-	fmt.Println(n.Get(5))
+	fmt.Println(c.Get(5))
+	fmt.Println(c.Set(5, 6))
+	fmt.Println(c.Get(5))
+	fmt.Println(c.GetIFPresent(5))
+	fmt.Println(c.Remove(5))
+	fmt.Println(c.Get(5))
 
 	// Output:
 	// <nil> Key not found
@@ -50,7 +50,7 @@ func ExampleMemoryStorage() {
 
 func ExampleLoader() {
 
-	c := Loader(func(k interface{}) (interface{}, error) {
+	c := NewLoader(func(k interface{}) (interface{}, error) {
 		fmt.Println("Load", k)
 		return 6, nil
 	})
@@ -78,12 +78,10 @@ func ExampleLoader() {
 
 func ExampleLockingCache() {
 
-	l := Loader(func(k interface{}) (interface{}, error) {
+	c := NewLoader(func(k interface{}) (interface{}, error) {
 		time.Sleep(time.Duration(k.(int)) * time.Millisecond)
 		return k, nil
-	})
-
-	c := New(l, Locking)
+	}, Locking)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

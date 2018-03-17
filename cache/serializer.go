@@ -6,7 +6,6 @@ type Serializer interface {
 	Unserialize([]byte) (interface{}, error)
 }
 
-// serializingCache stores serialized keys and values in its backend.
 type serializingCache struct {
 	Cache
 	KeySerializer   Serializer
@@ -20,7 +19,6 @@ func Serialization(key, value Serializer) Option {
 	}
 }
 
-// Set serializes both key and value before storing it into its backend.
 func (c *serializingCache) Set(key interface{}, value interface{}) (err error) {
 	skey, err := c.KeySerializer.Serialize(key)
 	if err != nil {
@@ -33,7 +31,6 @@ func (c *serializingCache) Set(key interface{}, value interface{}) (err error) {
 	return c.Cache.Set(skey, svalue)
 }
 
-// Get serializes the key, tries and fetchs the value from its backend and deserializes it.
 func (c *serializingCache) Get(key interface{}) (value interface{}, err error) {
 	skey, err := c.KeySerializer.Serialize(key)
 	if err != nil {
@@ -46,7 +43,6 @@ func (c *serializingCache) Get(key interface{}) (value interface{}, err error) {
 	return c.ValueSerializer.Unserialize(svalue.([]byte))
 }
 
-// GetIFPresent serializes the key, tries and fetchs the value from its backend and deserializes it.
 func (c *serializingCache) GetIFPresent(key interface{}) (value interface{}, err error) {
 	skey, err := c.KeySerializer.Serialize(key)
 	if err != nil {
@@ -59,7 +55,6 @@ func (c *serializingCache) GetIFPresent(key interface{}) (value interface{}, err
 	return c.ValueSerializer.Unserialize(svalue.([]byte))
 }
 
-// Remove serializes the key and removes the entry from its backend.
 func (c *serializingCache) Remove(key interface{}) bool {
 	skey, err := c.KeySerializer.Serialize(key)
 	if err != nil {

@@ -9,8 +9,8 @@ type boltStorage struct {
 }
 
 // NewBoltStorage creates a boltStorage from an open bolt.DB.
-func NewBoltStorage(db *bolt.DB, bucketName []byte) Cache {
-	return &boltStorage{db, bucketName}
+func NewBoltStorage(db *bolt.DB, bucketName []byte, opts ...Option) Cache {
+	return options(opts).applyTo(&boltStorage{db, bucketName})
 }
 
 func (s *boltStorage) Set(key interface{}, value interface{}) error {

@@ -107,7 +107,11 @@ func (e *lruEviction) Hit(key interface{}) {
 }
 
 func (e *lruEviction) Pop() (key interface{}) {
-	key = e.keys.Remove(e.keys.Back())
+	elem := e.keys.Back()
+	if elem == nil {
+		return
+	}
+	key = e.keys.Remove(elem)
 	delete(e.elements, key)
 	return
 }
@@ -137,7 +141,10 @@ func (e *lfuEviction) Hit(key interface{}) {
 }
 
 func (e *lfuEviction) Pop() (key interface{}) {
-	return heap.Pop(e.heap)
+	if e.heap.Len() > 0 {
+		key = heap.Pop(e.heap)
+	}
+	return
 }
 
 type countHeap struct {
@@ -151,7 +158,7 @@ func (h *countHeap) Len() int {
 }
 
 func (h *countHeap) Less(i, j int) bool {
-	return h.counts[j] < h.counts[i]
+	return h.counts[i] < h.counts[j]
 }
 
 func (h *countHeap) Swap(i, j int) {

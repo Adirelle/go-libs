@@ -5,32 +5,6 @@ import (
 	"strconv"
 )
 
-type printCache struct{}
-
-func (printCache) Set(k, v interface{}) error {
-	fmt.Println("Set", k, v)
-	return nil
-}
-
-func (printCache) Get(k interface{}) (interface{}, error) {
-	fmt.Println("Get", k)
-	return k, nil
-}
-
-func (printCache) GetIFPresent(k interface{}) (interface{}, error) {
-	fmt.Println("GetIFPresent", k)
-	return k, nil
-}
-
-func (printCache) Remove(k interface{}) bool {
-	fmt.Println("Remove", k)
-	return false
-}
-
-func (printCache) Flush() error {
-	return nil
-}
-
 type testSerializer struct{}
 
 func (testSerializer) Serialize(v interface{}) ([]byte, error) {
@@ -44,21 +18,16 @@ func (testSerializer) Unserialize(d []byte) (interface{}, error) {
 func ExampleSerializingCache() {
 
 	ser := testSerializer{}
-	b := printCache{}
-	c := New(b, Serialization(ser, ser))
+	c := NewVoidStorage(Serialization(ser, ser), Spy(fmt.Printf))
 
-	fmt.Println(c.Set(50, 65))
-	fmt.Println(c.Get(50))
-	fmt.Println(c.GetIFPresent(50))
-	fmt.Println(c.Remove(50))
+	c.Set(50, 65)
+	c.Get(50)
+	c.GetIFPresent(50)
+	c.Remove(50)
 
 	// Output:
-	// Set [53 48] [54 53]
-	// <nil>
-	// Get [53 48]
-	// 50 <nil>
-	// GetIFPresent [53 48]
-	// 50 <nil>
-	// Remove [53 48]
-	// false
+	// Set([53 48], [54 53]) -> <nil>
+	// Get([53 48]) -> <nil>, Key not found
+	// GetIFPresent([53 48]) -> <nil>, Key not found
+	// Remove([53 48]) -> false
 }

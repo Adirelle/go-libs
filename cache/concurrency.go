@@ -56,6 +56,7 @@ type singleFlight struct {
 	sync.Mutex
 }
 
+// SingleFlight adds a layer to deduplicate queries from concurrent goroutines.
 var SingleFlight Option = func(c Cache) Cache {
 	return &singleFlight{Cache: c, calls: make(map[interface{}]*call)}
 }

@@ -107,33 +107,6 @@ func (s *memoryStorage) String() string {
 	return fmt.Sprintf("Memory(%p)", *s)
 }
 
-// NewLoader creates a cache from a LoaderFunc
-func NewLoader(f LoaderFunc, opts ...Option) Cache {
-	return options(opts).applyTo(f)
-}
-
-// LoaderFunc simulates a cache by calling the functions on call to Get.
-type LoaderFunc func(interface{}) (interface{}, error)
-
-// Set is a no-op and never fails.
-func (LoaderFunc) Set(interface{}, interface{}) error { return nil }
-
-// Get calls the function.
-func (l LoaderFunc) Get(key interface{}) (interface{}, error) { return l(key) }
-
-// GetIFPresent is a no-op and always returns ErrKeyNotFound.
-func (LoaderFunc) GetIFPresent(interface{}) (interface{}, error) { return nil, ErrKeyNotFound }
-
-// Remove is a no-op and always returns false.
-func (LoaderFunc) Remove(interface{}) bool { return false }
-
-// Flush is a no-op and never fails.
-func (LoaderFunc) Flush() error { return nil }
-
-func (l LoaderFunc) String() string {
-	return fmt.Sprintf("Loader(0x%08x)", reflect.ValueOf(l).Pointer())
-}
-
 // Printf is printf signature
 type Printf func(string, ...interface{})
 
@@ -177,4 +150,100 @@ func (s *spy) Flush() (err error) {
 	err = s.Cache.Flush()
 	s.f("%s.Flush() -> %v\n", s.Cache, err)
 	return
+}
+
+type writeThrough struct {
+	outer Cache
+	inner Cache
+}
+
+// WriteThrough adds a second-level cache.
+func WriteThrough(outer Cache) Option {
+	return func(inner Cache) Cache {
+		return &writeThrough{outer, inner}
+	}
+}
+
+func (c *writeThrough) Set(key, value interface{}) (err error) {
+	err = c.outer.Set(key, value)
+	if err != nil {
+		return
+	}
+	return c.inner.Set(key, value)
+}
+
+func (c *writeThrough) Get(key interface{}) (value interface{}, err error) {
+	value, err = c.outer.Get(key)
+	if err != ErrKeyNotFound {
+		return
+	}
+	value, err = c.inner.Get(key)
+	if err == nil {
+		err = c.outer.Set(key, value)
+	}
+	return
+}
+
+func (c *writeThrough) GetIFPresent(key interface{}) (value interface{}, err error) {
+	value, err = c.outer.GetIFPresent(key)
+	if err != ErrKeyNotFound {
+		return
+	}
+	value, err = c.inner.GetIFPresent(key)
+	if err == nil {
+		err = c.outer.Set(key, value)
+	}
+	return
+}
+
+func (c *writeThrough) Remove(key interface{}) (removed bool) {
+	removed = c.outer.Remove(key)
+	return c.inner.Remove(key) || removed
+}
+
+func (c *writeThrough) Flush() (err error) {
+	err = c.outer.Flush()
+	if err == nil {
+		return c.inner.Flush()
+	}
+	return
+}
+
+func (c *writeThrough) String() string {
+	return fmt.Sprintf("WriteThrough(%s,%s)", c.outer, c.inner)
+}
+
+// NewLoader creates a cache from a LoaderFunc
+func NewLoader(f LoaderFunc, opts ...Option) Cache {
+	return options(opts).applyTo(f)
+}
+
+// Loader adds a loading mechanism to the cache to generate values on demand.
+// Note that: New*(..., Loader(f)) is equivalent to NewLoader(f, WriteThrough(c)).
+func Loader(f LoaderFunc) Option {
+	return func(c Cache) Cache {
+		return &writeThrough{c, f}
+	}
+}
+
+// LoaderFunc simulates a cache by calling the functions on call to Get.
+type LoaderFunc func(interface{}) (interface{}, error)
+
+// Set is a no-op and never fails.
+func (LoaderFunc) Set(interface{}, interface{}) error { return nil }
+
+// Get calls the function.
+func (l LoaderFunc) Get(key interface{}) (interface{}, error) { return l(key) }
+
+// GetIFPresent is a no-op and always returns ErrKeyNotFound.
+func (LoaderFunc) GetIFPresent(interface{}) (interface{}, error) { return nil, ErrKeyNotFound }
+
+// Remove is a no-op and always returns false.
+func (LoaderFunc) Remove(interface{}) bool { return false }
+
+// Flush is a no-op and never fails.
+func (LoaderFunc) Flush() error { return nil }
+
+func (l LoaderFunc) String() string {
+	return fmt.Sprintf("Loader(0x%08x)", reflect.ValueOf(l).Pointer())
 }

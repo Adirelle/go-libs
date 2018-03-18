@@ -28,29 +28,30 @@ func (s *boltStorage) Put(key interface{}, value interface{}) error {
 }
 
 func (s *boltStorage) Get(key interface{}) (value interface{}, err error) {
-	err = s.db.View(func(tx *bolt.Tx) (err error) {
+	err = s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(s.bucketName)
-		if b != nil {
-			value = b.Get(key.([]byte))
+		if b == nil {
+			return ErrKeyNotFound
 		}
-		return
+		result := b.Get(key.([]byte))
+		if result == nil {
+			return ErrKeyNotFound
+		}
+		value = result[:]
+		return nil
 	})
 	return
 }
 
-func (s *boltStorage) Remove(key interface{}) (found bool) {
-	s.db.Update(func(tx *bolt.Tx) (err error) {
+func (s *boltStorage) Remove(key interface{}) bool {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(s.bucketName)
-		if b == nil {
-			return
-		}
-		found = b.Get(key.([]byte)) == nil
-		if !found {
-			return
+		if b == nil || b.Get(key.([]byte)) == nil {
+			return ErrKeyNotFound
 		}
 		return b.Delete(key.([]byte))
 	})
-	return
+	return (err == nil)
 }
 
 func (s *boltStorage) Flush() error {

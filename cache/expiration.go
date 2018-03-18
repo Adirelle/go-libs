@@ -12,12 +12,12 @@ type expiringCache struct {
 	dates map[interface{}]time.Time
 }
 
-// Expiration creates an Option to expire entries.
+// Expiration adds automatic expiration to new entries using the given delay.
 func Expiration(ttl time.Duration) Option {
 	return ExpirationUsingClock(ttl, RealClock)
 }
 
-// ExpirationUsingClock creates an Option to expire entries using the given clock.
+// ExpirationUsingClock adds automatic expiration to new entries using the given clock.
 func ExpirationUsingClock(ttl time.Duration, cl Clock) Option {
 	return func(c Cache) Cache {
 		return &expiringCache{c, cl, ttl, make(map[interface{}]time.Time)}
@@ -84,7 +84,7 @@ func (e *expiringCache) String() string {
 	return fmt.Sprintf("Expiring(%s,%s)", e.Cache, e.ttl)
 }
 
-// Clock is a simple clock abstraction
+// Clock is a simple clock abstraction to be used with ExpirationUsingClock.
 type Clock interface {
 	Now() time.Time
 }

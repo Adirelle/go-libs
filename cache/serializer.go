@@ -14,7 +14,9 @@ type serializingCache struct {
 	ValueSerializer Serializer
 }
 
-// Serialization creates an Option to (un)serialize keys and values.
+// Serialization adds a layer that (un)serialize keys and values to []byte.
+// It can be useful for storages that requires keys and values to be of type []byte, like BoltStorage.
+// Please note that []byte is not hashable, thus cannot be used with MemoryStorage.
 func Serialization(key, value Serializer) Option {
 	return func(c Cache) Cache {
 		return &serializingCache{c, key, value}

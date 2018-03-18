@@ -5,33 +5,44 @@ import (
 	"container/list"
 )
 
-// EvictionStrategy is used by evictingCache to evict items.
-// Note that most EvictionStrategy are stateful and must not be shared between several evictingCache.
+// EvictionStrategy is used to select entries to evict when the underlying cache is full.
+// Most EvictionStrategy are stateful (they track the cached entries) and must not be used by several cache instances.
 type EvictionStrategy interface {
+	// Add indicates an entry have been added to the underlying cache.
 	Add(key interface{})
+
+	// Remove indicates an entry have been removed from the underlying cache.
 	Remove(key interface{}) (removed bool)
+
+	// Hit indicates an entry has been retrieved to from the underlying cache.
 	Hit(key interface{})
+
+	// Pop selects an entry to evict. It returns either its key, or nil if there is no entry to evict.
 	Pop() (key interface{})
 }
 
-// evictingCache uses a strategy to evict entries from its backend when the latter is full.
 type evictingCache struct {
 	Cache
 	s EvictionStrategy
 }
 
+// Eviction adds a layer to evict entries when the underlying cache is full.
+func Eviction(s EvictionStrategy) Option {
+	return func(c Cache) Cache {
+		return &evictingCache{c, s}
+	}
+}
+
 // LRUEviction adds entry eviction using the Least-Recently-Used strategy
-var LRUEviction Option = func(c Cache) Cache {
-	return &evictingCache{c, newLRUEviction()}
+func LRUEviction(c Cache) Cache {
+	return &evictingCache{c, NewLRUEviction()}
 }
 
 // LFUEviction adds entry eviction using the Least-Frequently-Used strategy
-var LFUEviction Option = func(c Cache) Cache {
-	return &evictingCache{c, newLFUEviction()}
+func LFUEviction(c Cache) Cache {
+	return &evictingCache{c, NewLFUEviction()}
 }
 
-// Set tries to put an entries into its backend. If it is full, it tries to evict an entry.
-// It only returns ErrCacheFull if it cannot evict any entries while the backend reports it is full.
 func (c *evictingCache) Set(key, value interface{}) error {
 	for true {
 		err := c.Cache.Set(key, value)
@@ -81,7 +92,8 @@ type lruEviction struct {
 	elements map[interface{}]*list.Element
 }
 
-func newLRUEviction() EvictionStrategy {
+// NewLRUEviction creates a new instance of the Least-Recently-Used strategy.
+func NewLRUEviction() EvictionStrategy {
 	return &lruEviction{list.New(), make(map[interface{}]*list.Element)}
 }
 
@@ -122,7 +134,8 @@ type lfuEviction struct {
 	heap *countHeap
 }
 
-func newLFUEviction() EvictionStrategy {
+// NewLFUEviction creates a new instance of the Least-Frequently-Used strategy.
+func NewLFUEviction() EvictionStrategy {
 	e := &lfuEviction{&countHeap{make(map[interface{}]int), nil, nil}}
 	heap.Init(e.heap)
 	return e

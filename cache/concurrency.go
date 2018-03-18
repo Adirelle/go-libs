@@ -11,8 +11,8 @@ type locking struct {
 	sync.Mutex
 }
 
-// Locking adds locking to an existing cache so it becomes safe to use from several goroutines.
-var Locking Option = func(c Cache) Cache {
+// Locking adds a locking layer so the cache can be safely used from concurrent goroutines.
+func Locking(c Cache) Cache {
 	return &locking{Cache: c}
 }
 
@@ -56,8 +56,8 @@ type singleFlight struct {
 	sync.Mutex
 }
 
-// SingleFlight adds a layer to deduplicate queries from concurrent goroutines.
-var SingleFlight Option = func(c Cache) Cache {
+// SingleFlight adds a layer that deduplicates Get queries from concurrent goroutines.
+func SingleFlight(c Cache) Cache {
 	return &singleFlight{Cache: c, calls: make(map[interface{}]*call)}
 }
 

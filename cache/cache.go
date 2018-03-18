@@ -9,14 +9,15 @@ import (
 // ErrKeyNotFound is returned by Cache.Get*() whenever the key is not present in the cache.
 var ErrKeyNotFound = errors.New("Key not found")
 
-// ErrCacheFull is returned by Cache.Put() whenever the cache cannot hold more entries.
+// ErrCacheFull is returned by Cache.Set() whenever the cache cannot hold more entries.
 var ErrCacheFull = errors.New("Cache is full")
 
 // Cache is the main abstraction.
 type Cache interface {
+	// The string representation should be human-readable. It is used by Spy().
 	fmt.Stringer
 
-	// Set adds an entry to the cache.
+	// Set sets an entry to the cache.
 	Set(key, value interface{}) error
 
 	// Get fetchs an entry from the cache.
@@ -31,11 +32,13 @@ type Cache interface {
 	// It returns whether the entry was actually found and removed.
 	Remove(key interface{}) bool
 
-	// Flush instructs the cache to perform any pending operations.
+	// Flush instructs the cache to finish all pending operations, if any.
+	// It must not return before all pending operations are finished.
 	Flush() error
 }
 
-// Option alters the cache behavior, adding new features.
+// Option adds optional features new to a cache.
+// Please note the order of options is important: they must be listed from outermost to innermost.
 type Option func(Cache) Cache
 
 type options []Option
@@ -61,7 +64,8 @@ func (voidStorage) Remove(interface{}) bool                       { return false
 func (voidStorage) Flush() error                                  { return nil }
 func (voidStorage) String() string                                { return "Void()" }
 
-// NewMemoryStorage creates an empty memory storage, using a simple go map.
+// NewMemoryStorage creates an empty cache based on a go map.
+// It is not safe to use from concurrent goroutines.
 func NewMemoryStorage(opts ...Option) Cache {
 	return options(opts).applyTo(new(memoryStorage))
 }
@@ -107,7 +111,7 @@ func (s *memoryStorage) String() string {
 	return fmt.Sprintf("Memory(%p)", *s)
 }
 
-// Printf is printf signature
+// Printf is a printf-like function to be used with Spy()
 type Printf func(string, ...interface{})
 
 type spy struct {
@@ -115,7 +119,7 @@ type spy struct {
 	f Printf
 }
 
-// Spy prints all operation using the provided printf function.
+// Spy logs operations using the given function.
 func Spy(f Printf) Option {
 	return func(c Cache) Cache {
 		return &spy{c, f}
@@ -163,6 +167,9 @@ type writeThrough struct {
 }
 
 // WriteThrough adds a second-level cache.
+// Get operations are tried on "outer" first. If it fails, it tries the inner cache.
+// If it succeed, the value is written to the outer cache.
+// Set and remove operations are forwarded to both caches.
 func WriteThrough(outer Cache) Option {
 	return func(inner Cache) Cache {
 		return &writeThrough{outer, inner}
@@ -218,7 +225,7 @@ func (c *writeThrough) String() string {
 	return fmt.Sprintf("WriteThrough(%s,%s)", c.outer, c.inner)
 }
 
-// NewLoader creates a cache from a LoaderFunc
+// NewLoader creates a pseudo-cache from a LoaderFunc.
 func NewLoader(f LoaderFunc, opts ...Option) Cache {
 	return options(opts).applyTo(f)
 }

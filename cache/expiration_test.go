@@ -23,8 +23,8 @@ func TestExpiringCache(t *testing.T) {
 		ExpirationUsingClock(8*time.Second, &cl),
 	)
 
-	if err := c.Set(5, 6); err != nil {
-		t.Fatal("Set: expected <nil>")
+	if err := c.Put(5, 6); err != nil {
+		t.Fatal("Put: expected <nil>")
 	}
 
 	if v, err := c.Get(5); err != nil || v != 6 {
@@ -37,8 +37,8 @@ func TestExpiringCache(t *testing.T) {
 		t.Error("Get: expected 6, <nil>")
 	}
 
-	if err := c.Set(7, 8); err != nil {
-		t.Error("Set: expected <nil>")
+	if err := c.Put(7, 8); err != nil {
+		t.Error("Put: expected <nil>")
 	}
 
 	cl.Advance(10 * time.Second)

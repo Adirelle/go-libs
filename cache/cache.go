@@ -3,30 +3,22 @@ package cache
 import (
 	"errors"
 	"fmt"
-	"reflect"
 )
 
 // ErrKeyNotFound is returned by Cache.Get*() whenever the key is not present in the cache.
 var ErrKeyNotFound = errors.New("Key not found")
-
-// ErrCacheFull is returned by Cache.Set() whenever the cache cannot hold more entries.
-var ErrCacheFull = errors.New("Cache is full")
 
 // Cache is the main abstraction.
 type Cache interface {
 	// The string representation should be human-readable. It is used by Spy().
 	fmt.Stringer
 
-	// Set sets an entry to the cache.
-	Set(key, value interface{}) error
+	// Put stores an entry into the cache.
+	Put(key, value interface{}) error
 
 	// Get fetchs an entry from the cache.
 	// It returns nil and ErrKeyNotFound when the key is not present.
 	Get(key interface{}) (value interface{}, err error)
-
-	// GetIFPresent fetchs an entry from the cache, without triggering any automatic LoaderFunc.
-	// It returns nil and ErrKeyNotFound when the key is not present.
-	GetIFPresent(key interface{}) (value interface{}, err error)
 
 	// Remove removes an entry from the cache.
 	// It returns whether the entry was actually found and removed.
@@ -35,6 +27,9 @@ type Cache interface {
 	// Flush instructs the cache to finish all pending operations, if any.
 	// It must not return before all pending operations are finished.
 	Flush() error
+
+	// Len returns the number of entries in the cache.
+	Len() int
 }
 
 // Option adds optional features new to a cache.
@@ -57,12 +52,12 @@ func NewVoidStorage(opts ...Option) Cache {
 
 type voidStorage struct{}
 
-func (voidStorage) Set(interface{}, interface{}) error            { return nil }
-func (voidStorage) Get(interface{}) (interface{}, error)          { return nil, ErrKeyNotFound }
-func (voidStorage) GetIFPresent(interface{}) (interface{}, error) { return nil, ErrKeyNotFound }
-func (voidStorage) Remove(interface{}) bool                       { return false }
-func (voidStorage) Flush() error                                  { return nil }
-func (voidStorage) String() string                                { return "Void()" }
+func (voidStorage) Put(interface{}, interface{}) error   { return nil }
+func (voidStorage) Get(interface{}) (interface{}, error) { return nil, ErrKeyNotFound }
+func (voidStorage) Remove(interface{}) bool              { return false }
+func (voidStorage) Flush() error                         { return nil }
+func (voidStorage) Len() int                             { return 0 }
+func (voidStorage) String() string                       { return "Void()" }
 
 // NewMemoryStorage creates an empty cache based on a go map.
 // It is not safe to use from concurrent goroutines.
@@ -72,7 +67,7 @@ func NewMemoryStorage(opts ...Option) Cache {
 
 type memoryStorage map[interface{}]interface{}
 
-func (s *memoryStorage) Set(key interface{}, value interface{}) error {
+func (s *memoryStorage) Put(key interface{}, value interface{}) error {
 	if *s == nil {
 		*s = make(map[interface{}]interface{})
 	}
@@ -89,10 +84,6 @@ func (s *memoryStorage) Get(key interface{}) (interface{}, error) {
 	return nil, ErrKeyNotFound
 }
 
-func (s *memoryStorage) GetIFPresent(key interface{}) (interface{}, error) {
-	return s.Get(key)
-}
-
 func (s *memoryStorage) Remove(key interface{}) bool {
 	if *s != nil {
 		if _, found := (*s)[key]; found {
@@ -105,6 +96,10 @@ func (s *memoryStorage) Remove(key interface{}) bool {
 
 func (s *memoryStorage) Flush() error {
 	return nil
+}
+
+func (s *memoryStorage) Len() int {
+	return len(*s)
 }
 
 func (s *memoryStorage) String() string {
@@ -126,10 +121,10 @@ func Spy(f Printf) Option {
 	}
 }
 
-func (s *spy) Set(key, value interface{}) (err error) {
-	s.f("%s.Set(%v, %v) -> ...\n", s.Cache, key, value)
-	err = s.Cache.Set(key, value)
-	s.f("%s.Set(%v, %v) -> %v\n", s.Cache, key, value, err)
+func (s *spy) Put(key, value interface{}) (err error) {
+	s.f("%s.Put(%v, %v) -> ...\n", s.Cache, key, value)
+	err = s.Cache.Put(key, value)
+	s.f("%s.Put(%v, %v) -> %v\n", s.Cache, key, value, err)
 	return
 }
 
@@ -137,13 +132,6 @@ func (s *spy) Get(key interface{}) (value interface{}, err error) {
 	s.f("%s.Get(%v) -> ...\n", s.Cache, key)
 	value, err = s.Cache.Get(key)
 	s.f("%s.Get(%v) -> %v, %v\n", s.Cache, key, value, err)
-	return
-}
-
-func (s *spy) GetIFPresent(key interface{}) (value interface{}, err error) {
-	s.f("%s.GetIFPresent(%v) -> ...\n", s.Cache, key)
-	value, err = s.Cache.GetIFPresent(key)
-	s.f("%s.GetIFPresent(%v) -> %v, %v\n", s.Cache, key, value, err)
 	return
 }
 
@@ -161,6 +149,13 @@ func (s *spy) Flush() (err error) {
 	return
 }
 
+func (s *spy) Len() (len int) {
+	s.f("%s.Len() -> ...\n", s.Cache)
+	len = s.Cache.Len()
+	s.f("%s.Len() -> %v\n", s.Cache, len)
+	return
+}
+
 type writeThrough struct {
 	outer Cache
 	inner Cache
@@ -169,19 +164,19 @@ type writeThrough struct {
 // WriteThrough adds a second-level cache.
 // Get operations are tried on "outer" first. If it fails, it tries the inner cache.
 // If it succeed, the value is written to the outer cache.
-// Set and remove operations are forwarded to both caches.
+// Put and remove operations are forwarded to both caches.
 func WriteThrough(outer Cache) Option {
 	return func(inner Cache) Cache {
 		return &writeThrough{outer, inner}
 	}
 }
 
-func (c *writeThrough) Set(key, value interface{}) (err error) {
-	err = c.outer.Set(key, value)
+func (c *writeThrough) Put(key, value interface{}) (err error) {
+	err = c.outer.Put(key, value)
 	if err != nil {
 		return
 	}
-	return c.inner.Set(key, value)
+	return c.inner.Put(key, value)
 }
 
 func (c *writeThrough) Get(key interface{}) (value interface{}, err error) {
@@ -191,19 +186,7 @@ func (c *writeThrough) Get(key interface{}) (value interface{}, err error) {
 	}
 	value, err = c.inner.Get(key)
 	if err == nil {
-		err = c.outer.Set(key, value)
-	}
-	return
-}
-
-func (c *writeThrough) GetIFPresent(key interface{}) (value interface{}, err error) {
-	value, err = c.outer.GetIFPresent(key)
-	if err != ErrKeyNotFound {
-		return
-	}
-	value, err = c.inner.GetIFPresent(key)
-	if err == nil {
-		err = c.outer.Set(key, value)
+		err = c.outer.Put(key, value)
 	}
 	return
 }
@@ -221,41 +204,149 @@ func (c *writeThrough) Flush() (err error) {
 	return
 }
 
+func (c *writeThrough) Len() int {
+	// Outer only contains a subset of entries of the inner cache.
+	return c.inner.Len()
+}
+
 func (c *writeThrough) String() string {
 	return fmt.Sprintf("WriteThrough(%s,%s)", c.outer, c.inner)
-}
-
-// NewLoader creates a pseudo-cache from a LoaderFunc.
-func NewLoader(f LoaderFunc, opts ...Option) Cache {
-	return options(opts).applyTo(f)
-}
-
-// Loader adds a loading mechanism to the cache to generate values on demand.
-// Note that: New*(..., Loader(f)) is equivalent to NewLoader(f, WriteThrough(c)).
-func Loader(f LoaderFunc) Option {
-	return func(c Cache) Cache {
-		return &writeThrough{c, f}
-	}
 }
 
 // LoaderFunc simulates a cache by calling the functions on call to Get.
 type LoaderFunc func(interface{}) (interface{}, error)
 
-// Set is a no-op and never fails.
-func (LoaderFunc) Set(interface{}, interface{}) error { return nil }
+type loader struct {
+	Cache
+	f LoaderFunc
+}
 
-// Get calls the function.
-func (l LoaderFunc) Get(key interface{}) (interface{}, error) { return l(key) }
+// NewLoader creates a pseudo-cache from a LoaderFunc.
+func NewLoader(f LoaderFunc, opts ...Option) Cache {
+	return options(opts).applyTo(&loader{voidStorage{}, f})
+}
 
-// GetIFPresent is a no-op and always returns ErrKeyNotFound.
-func (LoaderFunc) GetIFPresent(interface{}) (interface{}, error) { return nil, ErrKeyNotFound }
+// Loader adds a layer to generate values on demand.
+func Loader(f LoaderFunc) Option {
+	return func(c Cache) Cache {
+		return &loader{c, f}
+	}
+}
 
-// Remove is a no-op and always returns false.
-func (LoaderFunc) Remove(interface{}) bool { return false }
+func (l *loader) Get(key interface{}) (value interface{}, err error) {
+	value, err = l.Cache.Get(key)
+	if err != ErrKeyNotFound {
+		return
+	}
+	value, err = l.f(key)
+	if err == nil {
+		err = l.Cache.Put(key, value)
+	}
+	return
+}
 
-// Flush is a no-op and never fails.
-func (LoaderFunc) Flush() error { return nil }
+func (l *loader) String() string {
+	return fmt.Sprintf("Loader(%s,%v)", l.Cache, l.f)
+}
 
-func (l LoaderFunc) String() string {
-	return fmt.Sprintf("Loader(0x%08x)", reflect.ValueOf(l).Pointer())
+// EventType represents the type of operation that has been performed.
+type EventType uint8
+
+// EventType values
+const (
+	UNKNOWN EventType = iota
+	PUT
+	GET
+	REMOVE
+	FLUSH
+	LEN
+)
+
+func (e EventType) String() string {
+	switch e {
+	case PUT:
+		return "PUT"
+	case GET:
+		return "GET"
+	case REMOVE:
+		return "REMOVE"
+	case FLUSH:
+		return "FLUSH"
+	case LEN:
+		return "LEN"
+	default:
+		return fmt.Sprintf("EventType(%d)", e)
+	}
+}
+
+// GoString is fmt.Sprintf("cache.%s", e)
+func (e EventType) GoString() string {
+	return fmt.Sprintf("cache.%s", e)
+}
+
+// Event represents an operation on a cache.
+type Event struct {
+	// The type of operation
+	Type EventType
+
+	// The targetted cache
+	Cache Cache
+
+	// The entry key (PUT, GET, REMOVE)
+	Key interface{}
+
+	// The entry value (PUT) or any value returned by the operation (GET, REMOVE, LEN).
+	Value interface{}
+
+	// Any error returned by the operation (PUT, GET, FLUSH).
+	Err error
+}
+
+type emitter struct {
+	Cache
+	ch chan<- Event
+}
+
+// Emitter sends cache events to the given channel.
+func Emitter(ch chan<- Event) Option {
+	return func(c Cache) Cache {
+		return &emitter{c, ch}
+	}
+}
+
+func (e *emitter) emit(t EventType, key, value interface{}, err error) {
+	select {
+	case e.ch <- Event{t, e.Cache, key, value, err}:
+	default:
+	}
+}
+
+func (e *emitter) Put(key, value interface{}) (err error) {
+	err = e.Cache.Put(key, value)
+	e.emit(PUT, key, value, err)
+	return
+}
+
+func (e *emitter) Get(key interface{}) (value interface{}, err error) {
+	value, err = e.Cache.Get(key)
+	e.emit(GET, key, value, err)
+	return
+}
+
+func (e *emitter) Remove(key interface{}) (removed bool) {
+	removed = e.Cache.Remove(key)
+	e.emit(REMOVE, key, removed, nil)
+	return
+}
+
+func (e *emitter) Flush() (err error) {
+	err = e.Cache.Flush()
+	e.emit(FLUSH, nil, nil, err)
+	return
+}
+
+func (e *emitter) Len() (len int) {
+	len = e.Cache.Len()
+	e.emit(LEN, nil, len, nil)
+	return
 }

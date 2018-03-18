@@ -16,22 +16,16 @@ func Locking(c Cache) Cache {
 	return &locking{Cache: c}
 }
 
-func (l *locking) Set(key interface{}, value interface{}) error {
+func (l *locking) Put(key interface{}, value interface{}) error {
 	l.Lock()
 	defer l.Unlock()
-	return l.Cache.Set(key, value)
+	return l.Cache.Put(key, value)
 }
 
 func (l *locking) Get(key interface{}) (interface{}, error) {
 	l.Lock()
 	defer l.Unlock()
 	return l.Cache.Get(key)
-}
-
-func (l *locking) GetIFPresent(key interface{}) (interface{}, error) {
-	l.Lock()
-	defer l.Unlock()
-	return l.Cache.GetIFPresent(key)
 }
 
 func (l *locking) Remove(key interface{}) bool {
@@ -44,6 +38,12 @@ func (l *locking) Flush() error {
 	l.Lock()
 	defer l.Unlock()
 	return l.Cache.Flush()
+}
+
+func (l *locking) Len() int {
+	l.Lock()
+	defer l.Unlock()
+	return l.Cache.Len()
 }
 
 func (l *locking) String() string {
@@ -61,10 +61,10 @@ func SingleFlight(c Cache) Cache {
 	return &singleFlight{Cache: c, calls: make(map[interface{}]*call)}
 }
 
-func (f *singleFlight) Set(key, value interface{}) (err error) {
+func (f *singleFlight) Put(key, value interface{}) (err error) {
 	f.Lock()
 	defer f.Unlock()
-	err = f.Cache.Set(key, value)
+	err = f.Cache.Put(key, value)
 	c := f.calls[key]
 	if c != nil {
 		c.Resolve(value, err)
@@ -90,16 +90,6 @@ func (f *singleFlight) Get(key interface{}) (value interface{}, err error) {
 	}
 	f.Unlock()
 	return c.Await()
-}
-
-func (f *singleFlight) GetIFPresent(key interface{}) (value interface{}, err error) {
-	f.Lock()
-	c := f.calls[key]
-	f.Unlock()
-	if c != nil {
-		return c.Await()
-	}
-	return f.Cache.GetIFPresent(key)
 }
 
 func (f *singleFlight) Remove(key interface{}) (removed bool) {

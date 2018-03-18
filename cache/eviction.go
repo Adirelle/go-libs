@@ -8,11 +8,11 @@ import (
 // EvictionStrategy is used to select entries to evict when the underlying cache is full.
 // Most EvictionStrategy are stateful (they track the cached entries) and must not be used by several cache instances.
 type EvictionStrategy interface {
-	// Add indicates an entry have been added to the underlying cache.
-	Add(key interface{})
+	// Added indicates an entry have been added to the underlying cache.
+	Added(key interface{})
 
-	// Remove indicates an entry have been removed from the underlying cache.
-	Remove(key interface{}) (removed bool)
+	// Removed indicates an entry have been removed from the underlying cache.
+	Removed(key interface{}) (removed bool)
 
 	// Hit indicates an entry has been retrieved to from the underlying cache.
 	Hit(key interface{})
@@ -23,42 +23,45 @@ type EvictionStrategy interface {
 
 type evictingCache struct {
 	Cache
-	s EvictionStrategy
+	maxLen int
+	s      EvictionStrategy
 }
 
 // Eviction adds a layer to evict entries when the underlying cache is full.
-func Eviction(s EvictionStrategy) Option {
+func Eviction(maxLen int, s EvictionStrategy) Option {
 	return func(c Cache) Cache {
-		return &evictingCache{c, s}
+		return &evictingCache{c, maxLen, s}
 	}
 }
 
 // LRUEviction adds entry eviction using the Least-Recently-Used strategy
-func LRUEviction(c Cache) Cache {
-	return &evictingCache{c, NewLRUEviction()}
+func LRUEviction(maxLen int) Option {
+	return func(c Cache) Cache {
+		return &evictingCache{c, maxLen, NewLRUEviction()}
+	}
 }
 
 // LFUEviction adds entry eviction using the Least-Frequently-Used strategy
-func LFUEviction(c Cache) Cache {
-	return &evictingCache{c, NewLFUEviction()}
+func LFUEviction(maxLen int) Option {
+	return func(c Cache) Cache {
+		return &evictingCache{c, maxLen, NewLFUEviction()}
+	}
 }
 
-func (c *evictingCache) Set(key, value interface{}) error {
-	for true {
-		err := c.Cache.Set(key, value)
-		if err == nil {
-			break
-		}
-		if err != ErrCacheFull {
-			return err
-		}
+func (c *evictingCache) Put(key, value interface{}) (err error) {
+	for c.Cache.Len() > c.maxLen {
 		toEvict := c.s.Pop()
 		if toEvict == nil {
-			return err
+			break
 		}
-		c.Remove(toEvict)
+		if !c.Cache.Remove(toEvict) {
+			break
+		}
 	}
-	c.s.Add(key)
+	err = c.Cache.Put(key, value)
+	if err == nil {
+		c.s.Added(key)
+	}
 	return nil
 }
 
@@ -70,17 +73,9 @@ func (c *evictingCache) Get(key interface{}) (value interface{}, err error) {
 	return
 }
 
-func (c *evictingCache) GetIFPresent(key interface{}) (value interface{}, err error) {
-	value, err = c.Cache.GetIFPresent(key)
-	if err == nil {
-		c.s.Hit(key)
-	}
-	return
-}
-
-func (c *evictingCache) Remove(key interface{}) (removed bool) {
+func (c *evictingCache) Removed(key interface{}) (removed bool) {
 	if removed = c.Cache.Remove(key); removed {
-		c.s.Remove(key)
+		c.s.Removed(key)
 	}
 	return
 }
@@ -97,11 +92,11 @@ func NewLRUEviction() EvictionStrategy {
 	return &lruEviction{list.New(), make(map[interface{}]*list.Element)}
 }
 
-func (e *lruEviction) Add(key interface{}) {
+func (e *lruEviction) Added(key interface{}) {
 	e.elements[key] = e.keys.PushFront(key)
 }
 
-func (e *lruEviction) Remove(key interface{}) (found bool) {
+func (e *lruEviction) Removed(key interface{}) (found bool) {
 	elem, found := e.elements[key]
 	if found {
 		e.keys.Remove(elem)
@@ -114,7 +109,7 @@ func (e *lruEviction) Hit(key interface{}) {
 	if elem, found := e.elements[key]; found {
 		e.keys.MoveToFront(elem)
 	} else {
-		e.Add(key)
+		e.Added(key)
 	}
 }
 
@@ -141,12 +136,12 @@ func NewLFUEviction() EvictionStrategy {
 	return e
 }
 
-func (e *lfuEviction) Add(key interface{}) {
+func (e *lfuEviction) Added(key interface{}) {
 	heap.Push(e.heap, key)
 }
 
-func (e *lfuEviction) Remove(key interface{}) (found bool) {
-	return e.heap.Remove(key)
+func (e *lfuEviction) Removed(key interface{}) (found bool) {
+	return e.heap.Removed(key)
 }
 
 func (e *lfuEviction) Hit(key interface{}) {
@@ -191,7 +186,7 @@ func (h *countHeap) Increase(key interface{}) (found bool) {
 	return
 }
 
-func (h *countHeap) Remove(key interface{}) (found bool) {
+func (h *countHeap) Removed(key interface{}) (found bool) {
 	i, found := h.index[key]
 	if found {
 		heap.Remove(h, i)

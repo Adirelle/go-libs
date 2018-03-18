@@ -9,9 +9,9 @@ import (
 
 type delaying struct{ Cache }
 
-func (d delaying) Set(k, v interface{}) error {
+func (d delaying) Put(k, v interface{}) error {
 	time.Sleep(time.Millisecond * time.Duration(v.(int)))
-	return d.Cache.Set(k, v)
+	return d.Cache.Put(k, v)
 }
 
 func (d delaying) Get(k interface{}) (interface{}, error) {
@@ -35,12 +35,12 @@ func TestLockingCache(t *testing.T) {
 	c := NewMemoryStorage(Spy(timedPrintf(t)), Locking, delay)
 
 	wg := sync.WaitGroup{}
-	wg.Add(3)
+	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		if err := c.Set(100, 200); err != nil {
-			t.Error("Set: expected <nil>")
+		if err := c.Put(100, 200); err != nil {
+			t.Error("Put: expected <nil>")
 		}
 	}()
 
@@ -49,14 +49,6 @@ func TestLockingCache(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		if v, err := c.Get(100); err != nil || v != 200 {
 			t.Error("Get: expected 200, <nil>")
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		time.Sleep(100 * time.Millisecond)
-		if v, err := c.GetIFPresent(100); err != nil || v != 200 {
-			t.Error("GetIFPresent: expected 200, <nil>")
 		}
 	}()
 
@@ -120,32 +112,7 @@ func TestSingleFlight_Gets(t *testing.T) {
 	}
 }
 
-func TestSingleFlight_GetAndGetIFPresent(t *testing.T) {
-	c := NewLoader(slowRandomLoader, Spy(timedPrintf(t)), SingleFlight)
-
-	af := doDelayed(0, func() (interface{}, error) {
-		return c.Get(100)
-	})
-
-	bf := doDelayed(50, func() (interface{}, error) {
-		return c.GetIFPresent(100)
-	})
-
-	av, aerr := af()
-	if aerr != nil {
-		t.Fatal("expected no error")
-	}
-	bv, berr := bf()
-	if berr != nil {
-		t.Fatal("expected no error")
-	}
-
-	if av != bv {
-		t.Fatal("expected the same values")
-	}
-}
-
-func TestSingleFlight_GetAndSet(t *testing.T) {
+func TestSingleFlight_GetAndPut(t *testing.T) {
 
 	printf := timedPrintf(t)
 	c := NewLoader(slowRandomLoader, Spy(printf), SingleFlight)
@@ -154,7 +121,7 @@ func TestSingleFlight_GetAndSet(t *testing.T) {
 		return c.Get(100)
 	})
 	bf := doDelayed(50, func() (interface{}, error) {
-		return nil, c.Set(100, 50)
+		return nil, c.Put(100, 50)
 	})
 
 	if _, berr := bf(); berr != nil {

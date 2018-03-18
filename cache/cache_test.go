@@ -8,16 +8,12 @@ func TestVoidStorage(t *testing.T) {
 
 	c := NewVoidStorage(Spy(t.Logf))
 
-	if c.Set(5, 6) != nil {
-		t.Error("Set: expected <nil>")
+	if c.Put(5, 6) != nil {
+		t.Error("Put: expected <nil>")
 	}
 
 	if v, err := c.Get(5); v != nil || err != ErrKeyNotFound {
 		t.Errorf("Get: expected <nil>, %v", ErrKeyNotFound)
-	}
-
-	if v, err := c.GetIFPresent(5); v != nil || err != ErrKeyNotFound {
-		t.Errorf("GetIFPresent: expected <nil>, %v", ErrKeyNotFound)
 	}
 
 	if c.Remove(5) {
@@ -33,16 +29,12 @@ func TestMemoryStorage(t *testing.T) {
 
 	c := NewMemoryStorage(Spy(t.Logf))
 
-	if c.Set(5, 6) != nil {
-		t.Error("Set: expected <nil>")
+	if c.Put(5, 6) != nil {
+		t.Error("Put: expected <nil>")
 	}
 
 	if v, err := c.Get(5); v != 6 || err != nil {
 		t.Error("Get: expected 6, <nil>")
-	}
-
-	if v, err := c.GetIFPresent(5); v != 6 || err != nil {
-		t.Error("GetIFPresent: expected 6, <nil>")
 	}
 
 	if !c.Remove(5) {
@@ -76,12 +68,8 @@ func TestLoader(t *testing.T) {
 		t.Error("Get: expected 5, <nil>")
 	}
 
-	if err := c.Set(5, 6); err != nil {
-		t.Error("Set: expected <nil>")
-	}
-
-	if v, err := c.GetIFPresent(5); v != nil || err != ErrKeyNotFound {
-		t.Errorf("GetIFPresent: expected <nil>, %s", ErrKeyNotFound)
+	if err := c.Put(5, 6); err != nil {
+		t.Error("Put: expected <nil>")
 	}
 
 	if v := c.Remove(5); v {
@@ -90,5 +78,37 @@ func TestLoader(t *testing.T) {
 
 	if err := c.Flush(); err != nil {
 		t.Error("Flush: expected <nil>")
+	}
+}
+
+func TestEmiter(t *testing.T) {
+
+	ch := make(chan Event, 1)
+
+	c := NewVoidStorage(Emitter(ch), Spy(t.Logf))
+
+	c.Get(5)
+	if e := <-ch; e.Type != GET || e.Key != 5 || e.Value != nil || e.Err != ErrKeyNotFound {
+		t.Errorf("Event mismatch, got %#v", e)
+	}
+
+	c.Put(5, 6)
+	if e := <-ch; e.Type != PUT || e.Key != 5 || e.Value != 6 || e.Err != nil {
+		t.Errorf("Event mismatch, got %#v", e)
+	}
+
+	c.Remove(5)
+	if e := <-ch; e.Type != REMOVE || e.Key != 5 || e.Value != false || e.Err != nil {
+		t.Errorf("Event mismatch, got %#v", e)
+	}
+
+	c.Flush()
+	if e := <-ch; e.Type != FLUSH || e.Key != nil || e.Value != nil || e.Err != nil {
+		t.Errorf("Event mismatch, got %#v", e)
+	}
+
+	c.Len()
+	if e := <-ch; e.Type != LEN || e.Key != nil || e.Value != 0 || e.Err != nil {
+		t.Errorf("Event mismatch, got %#v", e)
 	}
 }

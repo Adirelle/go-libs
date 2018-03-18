@@ -6,19 +6,19 @@ import (
 
 func TestLRUEviction(t *testing.T) {
 
-	e := newLRUEviction()
+	e := NewLRUEviction()
 
 	for i := 1; i <= 4; i++ {
-		e.Add(i)
+		e.Added(i)
 	}
 
 	e.Hit(2)
 	e.Hit(5)
 
-	if !e.Remove(3) {
+	if !e.Removed(3) {
 		t.Fatalf("should be able to remove 3")
 	}
-	if e.Remove(6) {
+	if e.Removed(6) {
 		t.Fatalf("should not be able to remove 6")
 	}
 
@@ -37,20 +37,20 @@ func TestLRUEviction(t *testing.T) {
 
 func TestLFUEviction(t *testing.T) {
 
-	e := newLFUEviction()
+	e := NewLFUEviction()
 
 	for i := 1; i <= 3; i++ {
-		e.Add(i)
+		e.Added(i)
 	}
 
 	e.Hit(2)
 	e.Hit(2)
 	e.Hit(4)
 
-	if !e.Remove(3) {
+	if !e.Removed(3) {
 		t.Fatalf("should be able to remove 3")
 	}
-	if e.Remove(5) {
+	if e.Removed(5) {
 		t.Fatalf("should not be able to remove 5")
 	}
 

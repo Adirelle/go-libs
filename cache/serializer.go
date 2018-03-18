@@ -23,7 +23,7 @@ func Serialization(key, value Serializer) Option {
 	}
 }
 
-func (c *serializingCache) Set(key interface{}, value interface{}) (err error) {
+func (c *serializingCache) Put(key interface{}, value interface{}) (err error) {
 	skey, err := c.KeySerializer.Serialize(key)
 	if err != nil {
 		return
@@ -32,7 +32,7 @@ func (c *serializingCache) Set(key interface{}, value interface{}) (err error) {
 	if err != nil {
 		return
 	}
-	return c.Cache.Set(skey, svalue)
+	return c.Cache.Put(skey, svalue)
 }
 
 func (c *serializingCache) Get(key interface{}) (value interface{}, err error) {
@@ -41,18 +41,6 @@ func (c *serializingCache) Get(key interface{}) (value interface{}, err error) {
 		return
 	}
 	svalue, err := c.Cache.Get(skey)
-	if err != nil {
-		return
-	}
-	return c.ValueSerializer.Unserialize(svalue.([]byte))
-}
-
-func (c *serializingCache) GetIFPresent(key interface{}) (value interface{}, err error) {
-	skey, err := c.KeySerializer.Serialize(key)
-	if err != nil {
-		return
-	}
-	svalue, err := c.Cache.GetIFPresent(skey)
 	if err != nil {
 		return
 	}

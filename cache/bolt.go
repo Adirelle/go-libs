@@ -17,7 +17,7 @@ func NewBoltStorage(db *bolt.DB, bucketName []byte, opts ...Option) Cache {
 	return options(opts).applyTo(&boltStorage{db, bucketName})
 }
 
-func (s *boltStorage) Set(key interface{}, value interface{}) error {
+func (s *boltStorage) Put(key interface{}, value interface{}) error {
 	return s.db.Update(func(tx *bolt.Tx) (err error) {
 		b, err := tx.CreateBucketIfNotExists(s.bucketName)
 		if err != nil {
@@ -38,14 +38,6 @@ func (s *boltStorage) Get(key interface{}) (value interface{}, err error) {
 	return
 }
 
-func (s *boltStorage) GetIFPresent(key interface{}) (interface{}, error) {
-	return s.Get(key)
-}
-
-func (s *boltStorage) Flush() error {
-	return s.db.Sync()
-}
-
 func (s *boltStorage) Remove(key interface{}) (found bool) {
 	s.db.Update(func(tx *bolt.Tx) (err error) {
 		b := tx.Bucket(s.bucketName)
@@ -57,6 +49,22 @@ func (s *boltStorage) Remove(key interface{}) (found bool) {
 			return
 		}
 		return b.Delete(key.([]byte))
+	})
+	return
+}
+
+func (s *boltStorage) Flush() error {
+	return s.db.Sync()
+}
+
+func (s *boltStorage) Len() (len int) {
+	s.db.View(func(tx *bolt.Tx) (err error) {
+		b := tx.Bucket(s.bucketName)
+		if b == nil {
+			return
+		}
+		len = b.Stats().KeyN
+		return
 	})
 	return
 }

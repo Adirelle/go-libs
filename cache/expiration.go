@@ -24,31 +24,20 @@ func ExpirationUsingClock(ttl time.Duration, cl Clock) Option {
 	}
 }
 
-func (e *expiringCache) SetWithTTL(key, value interface{}, ttl time.Duration) (err error) {
-	err = e.Cache.Set(key, value)
-	if err == ErrCacheFull {
-		err = e.Flush()
-		if err == nil {
-			err = e.Cache.Set(key, value)
-		}
-	}
+func (e *expiringCache) PutWithTTL(key, value interface{}, ttl time.Duration) (err error) {
+	err = e.Cache.Put(key, value)
 	if err == nil {
 		e.dates[key] = e.Now().Add(ttl)
 	}
 	return
 }
 
-func (e *expiringCache) Set(key, value interface{}) error {
-	return e.SetWithTTL(key, value, e.ttl)
+func (e *expiringCache) Put(key, value interface{}) error {
+	return e.PutWithTTL(key, value, e.ttl)
 }
 
 func (e *expiringCache) Get(key interface{}) (interface{}, error) {
 	value, err := e.Cache.Get(key)
-	return e.got(key, value, err)
-}
-
-func (e *expiringCache) GetIFPresent(key interface{}) (interface{}, error) {
-	value, err := e.Cache.GetIFPresent(key)
 	return e.got(key, value, err)
 }
 

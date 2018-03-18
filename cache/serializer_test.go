@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"strconv"
 	"testing"
 )
@@ -17,14 +18,22 @@ func (testSerializer) Unserialize(d []byte) (interface{}, error) {
 
 func TestSerializingCache(t *testing.T) {
 
-	t.SkipNow()
-
 	ser := testSerializer{}
-	c := NewVoidStorage(Spy(t.Logf), Serialization(ser, ser), Spy(t.Logf))
+	ch := make(chan Event, 1)
+	c := NewVoidStorage(Serialization(ser, ser), Emitter(ch), Spy(t.Logf))
 
-	c.Set(50, 65)
+	c.Put(50, 60)
+	if e := <-ch; !bytes.Equal(e.Key.([]byte), []byte("50")) || !bytes.Equal(e.Value.([]byte), []byte("60")) {
+		t.Error(`Expected [53 48] and [54 48]`)
+	}
+
 	c.Get(50)
-	c.GetIFPresent(50)
-	c.Remove(50)
+	if e := <-ch; !bytes.Equal(e.Key.([]byte), []byte("50")) {
+		t.Error(`Expected [53 48]`)
+	}
 
+	c.Remove(50)
+	if e := <-ch; !bytes.Equal(e.Key.([]byte), []byte("50")) {
+		t.Error(`Expected [53 48]`)
+	}
 }

@@ -14,16 +14,18 @@ var ErrCacheFull = errors.New("Cache is full")
 
 // Cache is the main abstraction.
 type Cache interface {
+	fmt.Stringer
+
 	// Set adds an entry to the cache.
 	Set(key, value interface{}) error
 
 	// Get fetchs an entry from the cache.
 	// It returns nil and ErrKeyNotFound when the key is not present.
-	Get(key interface{}) (interface{}, error)
+	Get(key interface{}) (value interface{}, err error)
 
 	// GetIFPresent fetchs an entry from the cache, without triggering any automatic LoaderFunc.
 	// It returns nil and ErrKeyNotFound when the key is not present.
-	GetIFPresent(key interface{}) (interface{}, error)
+	GetIFPresent(key interface{}) (value interface{}, err error)
 
 	// Remove removes an entry from the cache.
 	// It returns whether the entry was actually found and removed.
@@ -31,8 +33,6 @@ type Cache interface {
 
 	// Flush instructs the cache to perform any pending operations.
 	Flush() error
-
-	fmt.Stringer
 }
 
 // Option alters the cache behavior, adding new features.
@@ -123,30 +123,35 @@ func Spy(f Printf) Option {
 }
 
 func (s *spy) Set(key, value interface{}) (err error) {
+	s.f("%s.Set(%v, %v) -> ...\n", s.Cache, key, value)
 	err = s.Cache.Set(key, value)
 	s.f("%s.Set(%v, %v) -> %v\n", s.Cache, key, value, err)
 	return
 }
 
 func (s *spy) Get(key interface{}) (value interface{}, err error) {
+	s.f("%s.Get(%v) -> ...\n", s.Cache, key)
 	value, err = s.Cache.Get(key)
 	s.f("%s.Get(%v) -> %v, %v\n", s.Cache, key, value, err)
 	return
 }
 
 func (s *spy) GetIFPresent(key interface{}) (value interface{}, err error) {
+	s.f("%s.GetIFPresent(%v) -> ...\n", s.Cache, key)
 	value, err = s.Cache.GetIFPresent(key)
 	s.f("%s.GetIFPresent(%v) -> %v, %v\n", s.Cache, key, value, err)
 	return
 }
 
 func (s *spy) Remove(key interface{}) (removed bool) {
+	s.f("%s.Remove(%v) -> ...\n", s.Cache, key)
 	removed = s.Cache.Remove(key)
 	s.f("%s.Remove(%v) -> %v\n", s.Cache, key, removed)
 	return
 }
 
 func (s *spy) Flush() (err error) {
+	s.f("%s.Flush() -> ...\n", s.Cache)
 	err = s.Cache.Flush()
 	s.f("%s.Flush() -> %v\n", s.Cache, err)
 	return

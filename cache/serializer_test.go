@@ -2,6 +2,7 @@ package cache
 
 import (
 	"bytes"
+	"encoding/binary"
 	"strconv"
 	"testing"
 )
@@ -35,5 +36,64 @@ func TestSerializingCache(t *testing.T) {
 	c.Remove(50)
 	if e := <-ch; !bytes.Equal(e.Key.([]byte), []byte("50")) {
 		t.Error(`Expected [53 48]`)
+	}
+}
+
+func TestStringSerializer(t *testing.T) {
+
+	s := StringSerializer{}
+
+	if b, err := s.Serialize("foobar"); !bytes.Equal(b, []byte("foobar")) || err != nil {
+		t.Errorf("Expected %v, got %v, %v", []byte("a"), b, err)
+	}
+
+	if b, err := s.Serialize(5); err == nil {
+		t.Errorf("Expected an error, got %v, %v", b, err)
+	}
+
+	if s, err := s.Unserialize([]byte("foobar")); s != "foobar" || err != nil {
+		t.Errorf("Expected %v, got %v, %v", "foobar", s, err)
+	}
+
+}
+
+type serializableTest struct {
+	X uint32
+	Y string
+}
+
+func (s *serializableTest) MarshalBinary() ([]byte, error) {
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.LittleEndian, s.X)
+	b.WriteString(s.Y)
+	return b.Bytes(), nil
+}
+
+func (s *serializableTest) UnmarshalBinary(data []byte) (err error) {
+	b := bytes.NewBuffer(data)
+	err = binary.Read(b, binary.LittleEndian, &s.X)
+	if err != nil {
+		return
+	}
+	s.Y, err = b.ReadString(0)
+	return nil
+}
+
+func TestBinarySerializer(t *testing.T) {
+	s := NewBinarySerializer(&serializableTest{})
+
+	b, err := s.Serialize(&serializableTest{5, "foobar"})
+	t.Logf("Serialize, got: %#v, %v", b, err)
+	if err != nil {
+		t.Fatal("Unexpected error")
+	}
+
+	y, err := s.Unserialize(b)
+	t.Logf("Unserialize, got: %#v, %v", y, err)
+	if err != nil {
+		t.Fatal("Unexpected error")
+	}
+	if z, ok := y.(*serializableTest); !ok || z.X != 5 || z.Y != "foobar" {
+		t.Fatal("Unexpected value")
 	}
 }

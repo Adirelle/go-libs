@@ -1,6 +1,10 @@
 package cache
 
-import "fmt"
+import (
+	"encoding"
+	"fmt"
+	"reflect"
+)
 
 // Serializer is used to (un)serialize keys and values.
 type Serializer interface {
@@ -57,4 +61,49 @@ func (c *serializingCache) Remove(key interface{}) bool {
 
 func (c *serializingCache) String() string {
 	return fmt.Sprintf("Serialized(%s,%v,%v)", c.Cache, c.KeySerializer, c.ValueSerializer)
+}
+
+// StringSerializer (un)serializes strings as-is.
+type StringSerializer struct{}
+
+// Serialize returns the string as a slice of bytes.
+func (StringSerializer) Serialize(data interface{}) ([]byte, error) {
+	if s, ok := data.(string); ok {
+		return []byte(s), nil
+	}
+	return nil, fmt.Errorf("StringSerializer.Serialize, invalid type %T", data)
+}
+
+// Unserialize returns the slice of bytes as a string.
+func (StringSerializer) Unserialize(data []byte) (interface{}, error) {
+	return string(data), nil
+}
+
+// BinarySerializable combines encoding.BinaryMarshaler and encoding.BinaryUnmarshaler.
+type BinarySerializable interface {
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
+}
+
+type binarySerializer struct {
+	t reflect.Type
+}
+
+// NewBinarySerializer creates a Serializer for a specific type implementing BinarySerializable.
+func NewBinarySerializer(sample BinarySerializable) Serializer {
+	return &binarySerializer{reflect.TypeOf(sample).Elem()}
+}
+
+func (s *binarySerializer) Serialize(data interface{}) ([]byte, error) {
+	bs, ok := data.(BinarySerializable)
+	if !ok {
+		return nil, fmt.Errorf("BinarySerializer.Serialize: unexpected value %v", data)
+	}
+	return bs.MarshalBinary()
+}
+
+func (s *binarySerializer) Unserialize(data []byte) (interface{}, error) {
+	v := reflect.New(s.t).Interface()
+	err := v.(BinarySerializable).UnmarshalBinary(data)
+	return v, err
 }

@@ -3,6 +3,7 @@ package cache
 import (
 	"container/heap"
 	"container/list"
+	"fmt"
 )
 
 // EvictionStrategy is used to select entries to evict when the underlying cache is full.
@@ -49,7 +50,7 @@ func LFUEviction(maxLen int) Option {
 }
 
 func (c *evictingCache) Put(key, value interface{}) (err error) {
-	for c.Cache.Len() > c.maxLen {
+	for c.Cache.Len() >= c.maxLen {
 		toEvict := c.s.Pop()
 		if toEvict == nil {
 			break
@@ -73,11 +74,13 @@ func (c *evictingCache) Get(key interface{}) (value interface{}, err error) {
 	return
 }
 
-func (c *evictingCache) Removed(key interface{}) (removed bool) {
-	if removed = c.Cache.Remove(key); removed {
-		c.s.Removed(key)
-	}
-	return
+func (c *evictingCache) Remove(key interface{}) bool {
+	c.s.Removed(key)
+	return c.Cache.Remove(key)
+}
+
+func (c *evictingCache) String() string {
+	return fmt.Sprintf("Evicting(%s,%d,%v)", c.Cache, c.maxLen, c.s)
 }
 
 // Least-Recently Used eviction strategy

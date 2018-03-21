@@ -59,6 +59,22 @@ func (voidStorage) Flush() error                         { return nil }
 func (voidStorage) Len() int                             { return 0 }
 func (voidStorage) String() string                       { return "Void()" }
 
+type namedCache struct {
+	Cache
+	name string
+}
+
+// Name gives a name to a cache. This name will be used by Spy(...).
+func Name(name string) Option {
+	return func(c Cache) Cache {
+		return &namedCache{c, name}
+	}
+}
+
+func (n *namedCache) String() string {
+	return n.name
+}
+
 // NewMemoryStorage creates an empty cache based on a go map.
 // It is not safe to use from concurrent goroutines.
 func NewMemoryStorage(opts ...Option) Cache {

@@ -20,6 +20,8 @@ type EvictionStrategy interface {
 
 	// Pop selects an entry to evict. It returns either its key, or nil if there is no entry to evict.
 	Pop() (key interface{})
+
+	fmt.Stringer
 }
 
 type evictingCache struct {
@@ -126,6 +128,10 @@ func (e *lruEviction) Pop() (key interface{}) {
 	return
 }
 
+func (e *lruEviction) String() string {
+	return fmt.Sprintf("LRU(%d)", len(e.elements))
+}
+
 // Least-Frequently Used eviction strategy
 
 type lfuEviction struct {
@@ -156,6 +162,10 @@ func (e *lfuEviction) Pop() (key interface{}) {
 		key = heap.Pop(e.heap)
 	}
 	return
+}
+
+func (e *lfuEviction) String() string {
+	return fmt.Sprintf("LFU(%d)", e.heap.Len())
 }
 
 type countHeap struct {

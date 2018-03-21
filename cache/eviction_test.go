@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -39,6 +40,10 @@ func (e *fakeEviction) Pop() (key interface{}) {
 	}
 	e.Log("Pop -> %T(%v)", key, key)
 	return
+}
+
+func (e *fakeEviction) String() string {
+	return fmt.Sprintf("Test(%d)", len(e.Values))
 }
 
 func TestEvictingCache(t *testing.T) {

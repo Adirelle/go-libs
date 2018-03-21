@@ -122,37 +122,32 @@ func Spy(f Printf) Option {
 }
 
 func (s *spy) Put(key, value interface{}) (err error) {
-	s.f("%s.Put(%v, %v) -> ...\n", s.Cache, key, value)
 	err = s.Cache.Put(key, value)
-	s.f("%s.Put(%v, %v) -> %v\n", s.Cache, key, value, err)
+	s.f("%s.Put(%T(%v), %T(%v)) -> %v", s.Cache, key, key, value, value, err)
 	return
 }
 
 func (s *spy) Get(key interface{}) (value interface{}, err error) {
-	s.f("%s.Get(%v) -> ...\n", s.Cache, key)
 	value, err = s.Cache.Get(key)
-	s.f("%s.Get(%v) -> %v, %v\n", s.Cache, key, value, err)
+	s.f("%s.Get(%T(%v)) -> %T(%v), %v", s.Cache, key, key, value, value, err)
 	return
 }
 
 func (s *spy) Remove(key interface{}) (removed bool) {
-	s.f("%s.Remove(%v) -> ...\n", s.Cache, key)
 	removed = s.Cache.Remove(key)
-	s.f("%s.Remove(%v) -> %v\n", s.Cache, key, removed)
+	s.f("%s.Remove(%T(%v)) -> %v", s.Cache, key, key, removed)
 	return
 }
 
 func (s *spy) Flush() (err error) {
-	s.f("%s.Flush() -> ...\n", s.Cache)
 	err = s.Cache.Flush()
-	s.f("%s.Flush() -> %v\n", s.Cache, err)
+	s.f("%s.Flush() -> %v", s.Cache, err)
 	return
 }
 
 func (s *spy) Len() (len int) {
-	s.f("%s.Len() -> ...\n", s.Cache)
 	len = s.Cache.Len()
-	s.f("%s.Len() -> %v\n", s.Cache, len)
+	s.f("%s.Len() -> %v", s.Cache, len)
 	return
 }
 

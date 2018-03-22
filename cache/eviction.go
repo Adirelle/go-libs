@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"container/list"
 	"fmt"
+	"sync"
 )
 
 // EvictionStrategy is used to select entries to evict when the underlying cache is full.
@@ -24,36 +25,37 @@ type EvictionStrategy interface {
 	fmt.Stringer
 }
 
+type EvictionFactory func() EvictionStrategy
+
 type evictingCache struct {
 	Cache
 	maxLen int
 	s      EvictionStrategy
+	sync.Mutex
 }
 
 // Eviction adds a layer to evict entries when the underlying cache is full.
-func Eviction(maxLen int, s EvictionStrategy) Option {
+func Eviction(maxLen int, f EvictionFactory) Option {
 	return func(c Cache) Cache {
-		return &evictingCache{c, maxLen, s}
+		return &evictingCache{Cache: c, maxLen: maxLen, s: f()}
 	}
 }
 
 // LRUEviction adds entry eviction using the Least-Recently-Used strategy
 func LRUEviction(maxLen int) Option {
-	return func(c Cache) Cache {
-		return &evictingCache{c, maxLen, NewLRUEviction()}
-	}
+	return Eviction(maxLen, NewLRUEviction)
 }
 
 // LFUEviction adds entry eviction using the Least-Frequently-Used strategy
 func LFUEviction(maxLen int) Option {
-	return func(c Cache) Cache {
-		return &evictingCache{c, maxLen, NewLFUEviction()}
-	}
+	return Eviction(maxLen, NewLFUEviction)
 }
 
 func (c *evictingCache) Put(key, value interface{}) (err error) {
 	for c.Cache.Len() >= c.maxLen {
+		c.Lock()
 		toEvict := c.s.Pop()
+		c.Unlock()
 		if toEvict == nil {
 			break
 		}
@@ -63,7 +65,9 @@ func (c *evictingCache) Put(key, value interface{}) (err error) {
 	}
 	err = c.Cache.Put(key, value)
 	if err == nil {
+		c.Lock()
 		c.s.Added(key)
+		c.Unlock()
 	}
 	return nil
 }
@@ -71,13 +75,17 @@ func (c *evictingCache) Put(key, value interface{}) (err error) {
 func (c *evictingCache) Get(key interface{}) (value interface{}, err error) {
 	value, err = c.Cache.Get(key)
 	if err == nil {
+		c.Lock()
 		c.s.Hit(key)
+		c.Unlock()
 	}
 	return
 }
 
 func (c *evictingCache) Remove(key interface{}) bool {
+	c.Lock()
 	c.s.Removed(key)
+	c.Unlock()
 	return c.Cache.Remove(key)
 }
 

@@ -48,9 +48,11 @@ func (e *fakeEviction) String() string {
 
 func TestEvictingCache(t *testing.T) {
 
-	e := &fakeEviction{make(map[interface{}]int), t.Logf}
+	newFakeEviction := func() EvictionStrategy {
+		return &fakeEviction{make(map[interface{}]int), t.Logf}
+	}
 
-	c := NewMemoryStorage(Spy(t.Logf), Eviction(3, e), Spy(t.Logf))
+	c := NewMemoryStorage(Spy(t.Logf), Eviction(3, newFakeEviction), Spy(t.Logf))
 
 	c.Put(1, 10)
 	if c.Len() != 1 {

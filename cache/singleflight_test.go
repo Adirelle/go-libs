@@ -7,61 +7,11 @@ import (
 	"time"
 )
 
-type delaying struct{ Cache }
-
-func (d delaying) Put(k, v interface{}) error {
-	time.Sleep(time.Millisecond * time.Duration(v.(int)))
-	return d.Cache.Put(k, v)
-}
-
-func (d delaying) Get(k interface{}) (interface{}, error) {
-	time.Sleep(time.Millisecond * time.Duration(k.(int)))
-	return d.Cache.Get(k)
-}
-
-func delay(c Cache) Cache {
-	return delaying{c}
-}
-
 func timedPrintf(t *testing.T) func(string, ...interface{}) {
 	ref := time.Now()
 	return func(tpl string, args ...interface{}) {
 		t.Logf("%s: "+tpl, append([]interface{}{time.Now().Sub(ref)}, args...)...)
 	}
-}
-
-func TestLockingCache(t *testing.T) {
-
-	c := NewMemoryStorage(Spy(timedPrintf(t)), Locking, delay)
-
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		if err := c.Put(100, 200); err != nil {
-			t.Error("Put: expected <nil>")
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		time.Sleep(50 * time.Millisecond)
-		if v, err := c.Get(100); err != nil || v != 200 {
-			t.Error("Get: expected 200, <nil>")
-		}
-	}()
-
-	wg.Wait()
-
-	if !c.Remove(100) {
-		t.Error("Remove: expected true")
-	}
-
-	if err := c.Flush(); err != nil {
-		t.Error("Flush: expected <nil>")
-	}
-
 }
 
 func slowRandomLoader(key interface{}) (interface{}, error) {

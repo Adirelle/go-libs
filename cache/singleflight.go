@@ -5,51 +5,6 @@ import (
 	"sync"
 )
 
-// locking secures concurrent access to a Cache using a sync.Mutex.
-type locking struct {
-	Cache
-	sync.Mutex
-}
-
-// Locking adds a locking layer so the cache can be safely used from concurrent goroutines.
-func Locking(c Cache) Cache {
-	return &locking{Cache: c}
-}
-
-func (l *locking) Put(key interface{}, value interface{}) error {
-	l.Lock()
-	defer l.Unlock()
-	return l.Cache.Put(key, value)
-}
-
-func (l *locking) Get(key interface{}) (interface{}, error) {
-	l.Lock()
-	defer l.Unlock()
-	return l.Cache.Get(key)
-}
-
-func (l *locking) Remove(key interface{}) bool {
-	l.Lock()
-	defer l.Unlock()
-	return l.Cache.Remove(key)
-}
-
-func (l *locking) Flush() error {
-	l.Lock()
-	defer l.Unlock()
-	return l.Cache.Flush()
-}
-
-func (l *locking) Len() int {
-	l.Lock()
-	defer l.Unlock()
-	return l.Cache.Len()
-}
-
-func (l *locking) String() string {
-	return fmt.Sprintf("Locked(%s)", l.Cache)
-}
-
 type singleFlight struct {
 	Cache
 	calls map[interface{}]*call

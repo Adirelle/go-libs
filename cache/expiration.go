@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -9,7 +10,7 @@ type expiringCache struct {
 	Cache
 	Clock
 	ttl   time.Duration
-	dates map[interface{}]time.Time
+	dates sync.Map
 }
 
 // Expiration adds automatic expiration to new entries using the given delay.
@@ -20,14 +21,14 @@ func Expiration(ttl time.Duration) Option {
 // ExpirationUsingClock adds automatic expiration to new entries using the given clock.
 func ExpirationUsingClock(ttl time.Duration, cl Clock) Option {
 	return func(c Cache) Cache {
-		return &expiringCache{c, cl, ttl, make(map[interface{}]time.Time)}
+		return &expiringCache{Cache: c, Clock: cl, ttl: ttl}
 	}
 }
 
 func (e *expiringCache) PutWithTTL(key, value interface{}, ttl time.Duration) (err error) {
 	err = e.Cache.Put(key, value)
 	if err == nil {
-		e.dates[key] = e.Now().Add(ttl)
+		e.dates.Store(key, e.Now().Add(ttl))
 	}
 	return
 }
@@ -45,9 +46,8 @@ func (e *expiringCache) got(key, value interface{}, err error) (interface{}, err
 	if err != nil {
 		return nil, err
 	}
-	if t, found := e.dates[key]; !found {
-		e.dates[key] = e.Now().Add(e.ttl)
-	} else if t.Before(e.Now()) {
+	t, _ := e.dates.LoadOrStore(key, e.Now().Add(e.ttl))
+	if t.(time.Time).Before(e.Now()) {
 		e.Remove(key)
 		return nil, ErrKeyNotFound
 	}
@@ -55,17 +55,18 @@ func (e *expiringCache) got(key, value interface{}, err error) (interface{}, err
 }
 
 func (e *expiringCache) Remove(key interface{}) bool {
-	delete(e.dates, key)
+	e.dates.Delete(key)
 	return e.Cache.Remove(key)
 }
 
 func (e *expiringCache) Flush() error {
 	now := e.Now()
-	for key, date := range e.dates {
-		if date.Before(now) {
-			e.Remove(key)
+	e.dates.Range(func(key, date interface{}) bool {
+		if date.(time.Time).Before(now) {
+			e.Cache.Remove(key)
 		}
-	}
+		return true
+	})
 	return e.Cache.Flush()
 }
 

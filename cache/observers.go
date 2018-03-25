@@ -47,6 +47,41 @@ func (s *spy) Len() (len int) {
 	return
 }
 
+type errorLogger struct {
+	Cache
+	log Printf
+}
+
+// LogErrors catchs and logs errors using the given function.
+func LogErrors(f Printf) Option {
+	return func(c Cache) Cache {
+		return &errorLogger{c, f}
+	}
+}
+
+func (c *errorLogger) Put(key, value interface{}) (err error) {
+	if err := c.Cache.Put(key, value); err != nil {
+		c.log("%s.Put(%v, %s): %s", c.Cache, key, value, err)
+	}
+	return nil
+}
+
+func (c *errorLogger) Get(key interface{}) (value interface{}, err error) {
+	value, err = c.Cache.Get(key)
+	if err != nil && err != ErrKeyNotFound {
+		c.log("%s.Get(%v): %s", c.Cache, key, err)
+		key = ErrKeyNotFound
+	}
+	return
+}
+
+func (c *errorLogger) Flush() error {
+	if err := c.Cache.Flush(); err != nil {
+		c.log("%s.Flush(): %s", c.Cache, err)
+	}
+	return nil
+}
+
 // EventType represents the type of operation that has been performed.
 type EventType uint8
 

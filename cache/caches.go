@@ -129,7 +129,6 @@ type writeThrough struct {
 	outer Cache
 	inner Cache
 	mu    sync.Mutex
-	wg    sync.WaitGroup
 }
 
 // WriteThrough adds a second-level cache.
@@ -145,12 +144,11 @@ func WriteThrough(outer Cache) Option {
 func (c *writeThrough) Put(key, value interface{}) (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		c.inner.Put(key, value)
-	}()
-	return c.outer.Put(key, value)
+	err = c.inner.Put(key, value)
+	if err == nil {
+		err = c.outer.Put(key, value)
+	}
+	return
 }
 
 func (c *writeThrough) Get(key interface{}) (value interface{}, err error) {
@@ -170,20 +168,18 @@ func (c *writeThrough) Get(key interface{}) (value interface{}, err error) {
 func (c *writeThrough) Remove(key interface{}) (removed bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		c.inner.Remove(key)
-	}()
-	return c.outer.Remove(key)
+	removed = c.inner.Remove(key)
+	return c.outer.Remove(key) || removed
 }
 
 func (c *writeThrough) Flush() (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.wg.Wait()
-	c.inner.Flush()
-	return c.outer.Flush()
+	err = c.inner.Flush()
+	if err == nil {
+		err = c.outer.Flush()
+	}
+	return
 }
 
 func (c *writeThrough) Len() int {

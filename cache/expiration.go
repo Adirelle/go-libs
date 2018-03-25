@@ -1,16 +1,24 @@
 package cache
 
 import (
+	"encoding/gob"
 	"fmt"
-	"sync"
 	"time"
 )
 
 type expiringCache struct {
 	Cache
 	Clock
-	ttl   time.Duration
-	dates sync.Map
+	ttl time.Duration
+}
+
+type expirableItem struct {
+	Value      interface{}
+	Expiration time.Time
+}
+
+func init() {
+	gob.Register(expirableItem{})
 }
 
 // Expiration adds automatic expiration to new entries using the given delay.
@@ -25,49 +33,25 @@ func ExpirationUsingClock(ttl time.Duration, cl Clock) Option {
 	}
 }
 
-func (e *expiringCache) PutWithTTL(key, value interface{}, ttl time.Duration) (err error) {
-	err = e.Cache.Put(key, value)
-	if err == nil {
-		e.dates.Store(key, e.Now().Add(ttl))
-	}
-	return
-}
-
 func (e *expiringCache) Put(key, value interface{}) error {
 	return e.PutWithTTL(key, value, e.ttl)
 }
 
-func (e *expiringCache) Get(key interface{}) (interface{}, error) {
-	value, err := e.Cache.Get(key)
-	return e.got(key, value, err)
+func (e *expiringCache) PutWithTTL(key, value interface{}, ttl time.Duration) error {
+	return e.Cache.Put(key, &expirableItem{value, e.Now().Add(ttl)})
 }
 
-func (e *expiringCache) got(key, value interface{}, err error) (interface{}, error) {
+func (e *expiringCache) Get(key interface{}) (interface{}, error) {
+	item, err := e.Cache.Get(key)
 	if err != nil {
 		return nil, err
 	}
-	t, _ := e.dates.LoadOrStore(key, e.Now().Add(e.ttl))
-	if t.(time.Time).Before(e.Now()) {
-		e.Remove(key)
+	it := item.(*expirableItem)
+	if it.Expiration.Before(e.Now()) {
+		e.Cache.Remove(key)
 		return nil, ErrKeyNotFound
 	}
-	return value, nil
-}
-
-func (e *expiringCache) Remove(key interface{}) bool {
-	e.dates.Delete(key)
-	return e.Cache.Remove(key)
-}
-
-func (e *expiringCache) Flush() error {
-	now := e.Now()
-	e.dates.Range(func(key, date interface{}) bool {
-		if date.(time.Time).Before(now) {
-			e.Cache.Remove(key)
-		}
-		return true
-	})
-	return e.Cache.Flush()
+	return it.Value, nil
 }
 
 func (e *expiringCache) String() string {

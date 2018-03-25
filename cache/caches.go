@@ -228,3 +228,51 @@ func (l *loader) Get(key interface{}) (value interface{}, err error) {
 func (l *loader) String() string {
 	return fmt.Sprintf("Loader(%s,%v)", l.Cache, l.f)
 }
+
+// ValidatorFunc is used to validate cache entries.
+type ValidatorFunc func(key, value interface{}) (bool, error)
+
+type validator struct {
+	Cache
+	f ValidatorFunc
+}
+
+// Validate validates every entry using the given function.
+func Validate(f ValidatorFunc) Option {
+	return func(c Cache) Cache {
+		return &validator{c, f}
+	}
+}
+
+func (c *validator) String() string {
+	return fmt.Sprintf("Validator(%s,%v)", c.Cache, c.f)
+}
+
+func (c *validator) Get(key interface{}) (value interface{}, err error) {
+	value, err = c.Cache.Get(key)
+	if err != nil {
+		return
+	}
+	ok, err := c.f(key, value)
+	if err == nil && !ok {
+		err = ErrKeyNotFound
+	}
+	if err != nil {
+		value = nil
+		c.Cache.Remove(key)
+	}
+	return
+}
+
+// Validable can validate itself
+type Validable interface {
+	IsValid() (bool, error)
+}
+
+// ValidateValidable is a ValidatorFunc that handles Validable.
+func ValidateValidable(key, value interface{}) (isValid bool, err error) {
+	if v, ok := value.(Validable); ok {
+		isValid, err = v.IsValid()
+	}
+	return
+}
